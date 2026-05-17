@@ -33,14 +33,8 @@ Only one connection method is supported:
 ```text
 Tuya QR Cloud Authentication
 ```
+<img width="676" height="1370" alt="image" src="https://github.com/user-attachments/assets/638940b7-6867-456f-a57e-c9c3ee223b5e" />
 
-Legacy connection methods were intentionally removed from this fork:
-
-```text
-Tuya IoT OpenAPI project credentials: removed
-Smart Home username/password cloud login: removed
-Local LAN / local-key mode: removed
-Hybrid cloud + local mode: removed
 ```
 
 ## Installation from Homebridge UI
