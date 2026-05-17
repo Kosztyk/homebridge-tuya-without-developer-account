@@ -1,23 +1,18 @@
 {
-  "name": "@homebridge-plugins/homebridge-tuya",
-  "displayName": "Homebridge Tuya",
-  "version": "3.0.0",
-  "description": "Unified Homebridge Tuya plugin supporting both Tuya Cloud (REST/MQTT) and Tuya Local (direct LAN TCP) communication.",
+  "name": "homebridge-tuya-without-developer-account",
+  "displayName": "Tuya without developer account for Homebridge",
+  "version": "1.0.0",
+  "description": "Homebridge plugin for Tuya and Smart Life devices using Home Assistant-style QR cloud authentication, without a Tuya IoT developer account.",
   "license": "MIT",
+  "author": "Kosztyk",
   "repository": {
     "type": "git",
-    "url": "https://github.com/homebridge-plugins/homebridge-tuya"
+    "url": "https://github.com/kosztyk/homebridge-tuya-without-developer-account.git"
   },
-  "homepage": "https://github.com/homebridge-plugins/homebridge-tuya#readme",
+  "homepage": "https://github.com/kosztyk/homebridge-tuya-without-developer-account#readme",
   "bugs": {
-    "url": "https://github.com/homebridge-plugins/homebridge-tuya/issues"
+    "url": "https://github.com/kosztyk/homebridge-tuya-without-developer-account/issues"
   },
-  "funding": [
-    {
-      "type": "github",
-      "url": "https://github.com/sponsors/tassy-h"
-    }
-  ],
   "engines": {
     "homebridge": "^1.8.0 || ^2.0.0-beta.0",
     "node": "^20 || ^22 || ^24 || ^25"
@@ -27,46 +22,40 @@
   },
   "main": "dist/index.js",
   "scripts": {
-    "check": "npm install && npm outdated",
-    "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix",
-    "test": "jest",
-    "coverage": "npm test -- --coverage",
-    "watch": "npm run build && npm link && nodemon",
-    "launch": "tsc && homebridge -I -D",
-    "build": "rimraf ./dist && tsc",
-    "prepublishOnly": "npm run lint && npm run build"
+    "pack:check": "npm pack --dry-run",
+    "publish:public": "npm publish --access public"
   },
   "keywords": [
     "homebridge-plugin",
+    "homebridge",
     "homekit",
-    "tuya"
+    "tuya",
+    "smartlife",
+    "smart-life",
+    "qr-auth",
+    "no-developer-account",
+    "home-assistant-style-auth"
   ],
   "dependencies": {
     "@homebridge/camera-utils": "^3.0.0",
+    "@homebridge/plugin-ui-utils": "^2.2.3",
     "color-convert": "^3.1.3",
-    "jsonschema": "^1.5.0",
     "kelvin-to-rgb": "^1.0.2",
-    "mqtt": "^5.15.1"
+    "mqtt": "^5.15.1",
+    "qrcode": "^1.5.4"
   },
-  "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/color-convert": "^2.0.4",
-    "@types/jest": "^30.0.0",
-    "@types/node": "^25.6.0",
-    "@typescript-eslint/eslint-plugin": "^8.58.2",
-    "@typescript-eslint/parser": "^8.58.2",
-    "eslint": "^10.2.1",
-    "homebridge": "^2.0.0-beta.0",
-    "jest": "^30.3.0",
-    "nodemon": "^3.1.14",
-    "rimraf": "^6.1.3",
-    "ts-jest": "^29.4.9",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
-  },
+  "files": [
+    "dist/**/*",
+    "homebridge-ui/**/*",
+    "config.schema.json",
+    "README.md",
+    "SUPPORTED_DEVICES.md",
+    "CHANGELOG.md",
+    "PUBLISHING.md",
+    "LICENSE"
+  ],
   "homebridge": {
     "plugin_type": "platform",
-    "platform": "TuyaPlatform"
+    "platform": "TuyaNoDeveloperAccount"
   }
 }

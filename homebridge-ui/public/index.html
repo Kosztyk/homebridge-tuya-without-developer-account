@@ -1,0 +1,329 @@
+<style>
+  .tuya-nodev-card {
+    border: 1px solid rgba(127, 127, 127, 0.25);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .tuya-nodev-title {
+    margin-bottom: 6px;
+    font-weight: 700;
+    font-size: 1.05rem;
+  }
+  .tuya-nodev-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .tuya-nodev-qr-wrap {
+    display: none;
+    text-align: center;
+    margin: 16px 0;
+  }
+  .tuya-nodev-qr-wrap img {
+    max-width: 300px;
+    width: 100%;
+    border-radius: 12px;
+    background: white;
+    padding: 10px;
+  }
+  .tuya-nodev-small {
+    font-size: 0.875rem;
+    opacity: 0.85;
+  }
+  .tuya-nodev-status {
+    margin-top: 12px;
+  }
+  .tuya-nodev-raw {
+    display: none;
+    word-break: break-all;
+    font-family: monospace;
+    font-size: 0.8rem;
+    margin-top: 8px;
+  }
+</style>
+
+<div class="tuya-nodev-card">
+  <div class="tuya-nodev-title">Tuya QR Cloud Authentication</div>
+  <p class="tuya-nodev-small mb-3">
+    This plugin connects Tuya / Smart Life devices to Homebridge using the same QR authorization style used by the official Home Assistant Tuya integration. It does not need a Tuya IoT developer account, Access ID, Access Secret, cloud project, username, or password.
+  </p>
+
+  <div class="form-group">
+    <label for="tuyaNodevName">Platform name</label>
+    <input id="tuyaNodevName" class="form-control" type="text" value="Tuya without developer account">
+  </div>
+
+  <div class="form-group">
+    <label for="tuyaNodevUserCode">Tuya User Code</label>
+    <input id="tuyaNodevUserCode" class="form-control" type="text" placeholder="Paste the Tuya User Code here" autocomplete="off">
+    <small class="form-text text-muted">In the Tuya Smart or Smart Life app, find the User Code under account/security settings, then paste it here.</small>
+  </div>
+
+  <div class="tuya-nodev-actions">
+    <button id="tuyaNodevGenerate" class="btn btn-primary" type="button">Generate QR Code</button>
+    <button id="tuyaNodevCheck" class="btn btn-outline-secondary" type="button">Check Existing Auth</button>
+    <button id="tuyaNodevClear" class="btn btn-outline-danger" type="button">Clear Saved Auth</button>
+    <button id="tuyaNodevSave" class="btn btn-success" type="button" disabled>Save Configuration</button>
+  </div>
+
+  <div id="tuyaNodevQrWrap" class="tuya-nodev-qr-wrap">
+    <img id="tuyaNodevQr" alt="Tuya QR Code">
+    <div class="tuya-nodev-small mt-2">Scan this QR code with the Tuya Smart or Smart Life mobile app.</div>
+    <div id="tuyaNodevRaw" class="tuya-nodev-raw"></div>
+  </div>
+
+  <div id="tuyaNodevStatus" class="tuya-nodev-status alert alert-info">
+    Enter your User Code, click Generate QR Code, then scan with the Tuya Smart or Smart Life app.
+  </div>
+</div>
+
+<script>
+(() => {
+  const PLATFORM = 'TuyaNoDeveloperAccount';
+  let currentConfig = null;
+  let pollTimer = null;
+  let isAuthenticated = false;
+
+  const $ = (id) => document.getElementById(id);
+
+  function setStatus(message, type = 'info') {
+    const el = $('tuyaNodevStatus');
+    el.className = `tuya-nodev-status alert alert-${type}`;
+    el.textContent = message;
+  }
+
+  function getUserCode() {
+    return $('tuyaNodevUserCode').value.trim();
+  }
+
+  function getPlatformName() {
+    return $('tuyaNodevName').value.trim() || 'Tuya without developer account';
+  }
+
+  function normaliseConfig(base) {
+    const cfg = base && typeof base === 'object' ? JSON.parse(JSON.stringify(base)) : {};
+    cfg.platform = PLATFORM;
+    cfg.name = getPlatformName();
+    cfg.options = cfg.options && typeof cfg.options === 'object' ? cfg.options : {};
+    cfg.options.userCode = getUserCode();
+    cfg.options.projectType = '3';
+    delete cfg.options.accessId;
+    delete cfg.options.accessKey;
+    delete cfg.options.username;
+    delete cfg.options.password;
+    delete cfg.options.countryCode;
+    delete cfg.options.endpoint;
+    delete cfg.local;
+    cfg.mode = 'cloud';
+    return cfg;
+  }
+
+  async function syncConfigToUi() {
+    currentConfig = normaliseConfig(currentConfig);
+    await homebridge.updatePluginConfig([currentConfig]);
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function disableSaving() {
+    $('tuyaNodevSave').disabled = true;
+    if (homebridge.disableSaveButton) homebridge.disableSaveButton();
+  }
+
+  function enableSaving() {
+    $('tuyaNodevSave').disabled = false;
+    if (homebridge.enableSaveButton) homebridge.enableSaveButton();
+  }
+
+  async function checkAuth(showSuccessToast = false) {
+    const userCode = getUserCode();
+    if (!userCode) {
+      setStatus('User Code is required.', 'warning');
+      return false;
+    }
+    try {
+      const res = await homebridge.request('/auth/status', { userCode });
+      isAuthenticated = !!res.authenticated;
+      if (isAuthenticated) {
+        enableSaving();
+        const who = res.username || res.uid || 'Tuya user';
+        setStatus(`Authenticated as ${who}. You can save the configuration.`, 'success');
+        if (showSuccessToast) homebridge.toast.success('Tuya QR authentication is already saved.', 'Tuya');
+        return true;
+      }
+      disableSaving();
+      setStatus('No saved Tuya QR authentication found for this User Code. Generate and scan a QR code before saving.', 'warning');
+      return false;
+    } catch (e) {
+      isAuthenticated = false;
+      disableSaving();
+      setStatus(e.message || 'Could not check authentication.', 'danger');
+      return false;
+    }
+  }
+
+  async function pollStatus() {
+    const userCode = getUserCode();
+    try {
+      const res = await homebridge.request('/qr/status', { userCode });
+      if (res.authenticated) {
+        stopPolling();
+        isAuthenticated = true;
+        enableSaving();
+        const who = res.username || res.uid || 'Tuya user';
+        setStatus(`QR approved. Auth token was saved for ${who}. Now click Save Configuration.`, 'success');
+        homebridge.toast.success('QR scan approved. Click Save Configuration.', 'Tuya');
+        await syncConfigToUi();
+        return;
+      }
+      if (res.expired) {
+        stopPolling();
+        isAuthenticated = false;
+        disableSaving();
+        setStatus('QR code expired. Generate a new QR code.', 'warning');
+        return;
+      }
+      setStatus(res.message || 'Waiting for Tuya app scan / approval...', 'info');
+    } catch (e) {
+      setStatus(e.message || 'Waiting for QR approval...', 'warning');
+    }
+  }
+
+  async function generateQr() {
+    const userCode = getUserCode();
+    if (!userCode) {
+      setStatus('User Code is required.', 'warning');
+      return;
+    }
+    try {
+      stopPolling();
+      homebridge.showSpinner();
+      isAuthenticated = false;
+      disableSaving();
+      await syncConfigToUi();
+      const res = await homebridge.request('/qr/start', {
+        userCode,
+        force: true,
+      });
+      if (res.alreadyAuthenticated || res.authenticated) {
+        isAuthenticated = true;
+        enableSaving();
+        setStatus('Existing Tuya QR authentication found. You can save the configuration.', 'success');
+        return;
+      }
+      $('tuyaNodevQr').src = res.qrDataUrl;
+      $('tuyaNodevQrWrap').style.display = 'block';
+      $('tuyaNodevRaw').style.display = 'block';
+      $('tuyaNodevRaw').textContent = res.qrPayload;
+      setStatus('QR code generated. Scan it with the Tuya app. Waiting for approval...', 'info');
+      pollTimer = setInterval(pollStatus, 3000);
+      setTimeout(pollStatus, 1000);
+    } catch (e) {
+      stopPolling();
+      setStatus(e.message || 'Failed to generate QR code.', 'danger');
+      homebridge.toast.error(e.message || 'Failed to generate QR code.', 'Tuya');
+    } finally {
+      homebridge.hideSpinner();
+    }
+  }
+
+  async function clearAuth() {
+    const userCode = getUserCode();
+    if (!userCode) {
+      setStatus('User Code is required.', 'warning');
+      return;
+    }
+    try {
+      stopPolling();
+      await homebridge.request('/auth/clear', { userCode });
+      isAuthenticated = false;
+      disableSaving();
+      setStatus('Saved Tuya QR auth was cleared. Generate and scan a new QR code.', 'warning');
+      homebridge.toast.success('Saved auth cleared.', 'Tuya');
+    } catch (e) {
+      setStatus(e.message || 'Failed to clear auth.', 'danger');
+    }
+  }
+
+  async function saveConfig() {
+    if (!isAuthenticated) {
+      setStatus('Scan and approve the QR code before saving.', 'warning');
+      return;
+    }
+    try {
+      homebridge.showSpinner();
+      await syncConfigToUi();
+      await homebridge.savePluginConfig();
+      homebridge.toast.success('Configuration saved. Restart Homebridge to load devices.', 'Tuya');
+      setStatus('Configuration saved. Restart Homebridge to load devices.', 'success');
+    } catch (e) {
+      setStatus(e.message || 'Failed to save configuration.', 'danger');
+      homebridge.toast.error(e.message || 'Failed to save configuration.', 'Tuya');
+    } finally {
+      homebridge.hideSpinner();
+    }
+  }
+
+  async function init() {
+    try {
+      const blocks = await homebridge.getPluginConfig();
+      currentConfig = Array.isArray(blocks) && blocks.length > 0 ? blocks[0] : {
+        platform: PLATFORM,
+        name: 'Tuya without developer account',
+        mode: 'cloud',
+        options: { projectType: '3' },
+      };
+      currentConfig.platform = PLATFORM;
+      currentConfig.mode = 'cloud';
+      currentConfig.options = currentConfig.options || {};
+      currentConfig.options.projectType = '3';
+      $('tuyaNodevName').value = currentConfig.name || 'Tuya without developer account';
+      $('tuyaNodevUserCode').value = currentConfig.options?.userCode || '';
+
+      if (homebridge.showSchemaForm) homebridge.showSchemaForm();
+      window.homebridge.addEventListener('configChanged', (event) => {
+        const data = event.data;
+        const block = Array.isArray(data) ? data[0] : data;
+        if (block && typeof block === 'object') {
+          currentConfig = block;
+          currentConfig.platform = PLATFORM;
+          currentConfig.mode = 'cloud';
+          currentConfig.options = currentConfig.options || {};
+          currentConfig.options.projectType = '3';
+          if (block.name) $('tuyaNodevName').value = block.name;
+          if (block.options?.userCode) $('tuyaNodevUserCode').value = block.options.userCode;
+        }
+      });
+
+      $('tuyaNodevGenerate').addEventListener('click', generateQr);
+      $('tuyaNodevCheck').addEventListener('click', () => checkAuth(true));
+      $('tuyaNodevClear').addEventListener('click', clearAuth);
+      $('tuyaNodevSave').addEventListener('click', saveConfig);
+      $('tuyaNodevName').addEventListener('input', syncConfigToUi);
+      $('tuyaNodevUserCode').addEventListener('input', () => {
+        isAuthenticated = false;
+        disableSaving();
+        syncConfigToUi();
+      });
+
+      await syncConfigToUi();
+      if (getUserCode()) {
+        await checkAuth(false);
+      } else {
+        disableSaving();
+      }
+    } catch (e) {
+      setStatus(e.message || 'Failed to initialise Tuya QR UI.', 'danger');
+    }
+  }
+
+  window.homebridge.addEventListener('ready', init);
+})();
+</script>
