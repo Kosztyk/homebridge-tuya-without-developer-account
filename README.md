@@ -1,3 +1,5 @@
+<img width="100" height="100" alt="homebridge-tuya" src="https://github.com/user-attachments/assets/832e195e-437e-42db-b732-e1d4c0003477" />
+
 # Tuya without developer account for Homebridge
 
 A Homebridge platform plugin for Tuya and Smart Life devices that uses **Home Assistant-style Tuya QR Cloud Authentication**.
