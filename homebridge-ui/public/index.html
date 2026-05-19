@@ -1,4 +1,11 @@
 <style>
+  .tuya-nodev-logo {
+    display: block;
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 12px;
+    border-radius: 16px;
+  }
   .tuya-nodev-card {
     border: 1px solid rgba(127, 127, 127, 0.25);
     border-radius: 12px;
@@ -45,7 +52,8 @@
 </style>
 
 <div class="tuya-nodev-card">
-  <div class="tuya-nodev-title">Tuya QR Cloud Authentication</div>
+  <img class="tuya-nodev-logo" src="./homebridge-tuya.png" alt="Tuya without developer account logo">
+  <div class="tuya-nodev-title" style="text-align:center;">Tuya QR Cloud Authentication</div>
   <p class="tuya-nodev-small mb-3">
     This plugin connects Tuya / Smart Life devices to Homebridge using the same QR authorization style used by the official Home Assistant Tuya integration. It does not need a Tuya IoT developer account, Access ID, Access Secret, cloud project, username, or password.
   </p>

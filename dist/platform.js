@@ -130,10 +130,17 @@ class TuyaPlatform {
     try {
       const raw = await fs.promises.readFile(file, "utf8");
       const data = JSON.parse(raw);
-      if (!data.userCode || !data.endpoint || !data.terminalId || !data.tokenInfo?.access_token || !data.tokenInfo?.refresh_token) {
+      const tokenInfo = data.tokenInfo || {};
+      if (!data.userCode || !data.endpoint || !data.terminalId || !(tokenInfo.access_token || tokenInfo.accessToken) || !(tokenInfo.refresh_token || tokenInfo.refreshToken)) {
         this.log.warn("[Tuya QR] Existing auth file is incomplete. Clear authentication in the plugin settings and scan again.");
         return undefined;
       }
+      data.tokenInfo = {
+        ...tokenInfo,
+        access_token: tokenInfo.access_token || tokenInfo.accessToken,
+        refresh_token: tokenInfo.refresh_token || tokenInfo.refreshToken,
+        expire_time: tokenInfo.expire_time || tokenInfo.expireTime || tokenInfo.expire || 7200,
+      };
       return data;
     } catch {
       return undefined;
@@ -219,14 +226,22 @@ class TuyaPlatform {
       return undefined;
     }
 
-    const api = new TuyaHACloudAPI(userCode, authData.terminalId, authData.endpoint, authData.tokenInfo, this.log, debugMode);
+    const api = new TuyaHACloudAPI(userCode, authData.terminalId, authData.endpoint, authData.tokenInfo, this.log, debugMode, async (tokenInfo) => {
+      await this.writeAuthData(userCode, {
+        ...authData,
+        endpoint: api.endpoint,
+        tokenInfo,
+        savedAt: Date.now(),
+        refreshedAt: Date.now(),
+      });
+    });
     const deviceManager = new TuyaHADeviceManager(api, debugMode);
 
     this.log.info("[Tuya QR] Fetching home list.");
     const res = await deviceManager.getHomeList();
     if (res.success === false) {
       this.log.error(`[Tuya QR] Fetching home list failed. code=${res.code}, msg=${res.msg}`);
-      this.log.error("[Tuya QR] If the token is expired or invalid, clear authentication in the plugin settings and scan again.");
+      this.log.error("[Tuya QR] Token refresh was attempted automatically. If this continues, clear authentication in the plugin settings and scan again.");
       return undefined;
     }
 

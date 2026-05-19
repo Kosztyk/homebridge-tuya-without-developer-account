@@ -1,4 +1,6 @@
-<img width="100" height="100" alt="homebridge-tuya" src="https://github.com/user-attachments/assets/832e195e-437e-42db-b732-e1d4c0003477" />
+<p align="center">
+  <img src="./homebridge-ui/public/homebridge-tuya.png" width="96" alt="Tuya without developer account for Homebridge" />
+</p>
 
 # Tuya without developer account for Homebridge
 
@@ -35,8 +37,14 @@ Only one connection method is supported:
 ```text
 Tuya QR Cloud Authentication
 ```
-<img width="676" height="1370" alt="image" src="https://github.com/user-attachments/assets/638940b7-6867-456f-a57e-c9c3ee223b5e" />
 
+Legacy connection methods were intentionally removed from this fork:
+
+```text
+Tuya IoT OpenAPI project credentials: removed
+Smart Home username/password cloud login: removed
+Local LAN / local-key mode: removed
+Hybrid cloud + local mode: removed
 ```
 
 ## Installation from Homebridge UI
@@ -227,3 +235,14 @@ This project is based on the Homebridge Tuya plugin codebase and adapts the Tuya
 ## License
 
 MIT
+
+
+## Token refresh and sign invalid errors
+
+Version 1.0.1 and later persist refreshed Tuya QR tokens back to the Homebridge storage auth file. This prevents repeated startup failures such as:
+
+```text
+[Tuya QR] Fetching home list failed. code=-9999999, msg=sign invalid
+```
+
+If this still happens after upgrading, open the plugin settings, clear the saved authentication, generate a new QR code, scan it with the Tuya Smart or Smart Life app, save the configuration, and restart Homebridge. Also confirm the Homebridge host clock is synchronized, because Tuya signed requests depend on the current time.

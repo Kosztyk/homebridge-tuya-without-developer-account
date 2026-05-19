@@ -35,9 +35,16 @@ function normaliseUserCode(userCode) {
       try {
         const raw = await fs.promises.readFile(this.getAuthFile(userCode), 'utf8');
         const data = JSON.parse(raw);
-        if (!data.userCode || !data.endpoint || !data.terminalId || !data.tokenInfo?.access_token || !data.tokenInfo?.refresh_token) {
+        const tokenInfo = data.tokenInfo || {};
+        if (!data.userCode || !data.endpoint || !data.terminalId || !(tokenInfo.access_token || tokenInfo.accessToken) || !(tokenInfo.refresh_token || tokenInfo.refreshToken)) {
           return null;
         }
+        data.tokenInfo = {
+          ...tokenInfo,
+          access_token: tokenInfo.access_token || tokenInfo.accessToken,
+          refresh_token: tokenInfo.refresh_token || tokenInfo.refreshToken,
+          expire_time: tokenInfo.expire_time || tokenInfo.expireTime || tokenInfo.expire || 7200,
+        };
         return data;
       } catch {
         return null;
@@ -178,14 +185,14 @@ function normaliseUserCode(userCode) {
         const info = loginResponse.result || {};
         const authData = {
           userCode,
-          terminalId: info.terminal_id,
+          terminalId: info.terminal_id || info.terminalId,
           endpoint: info.endpoint,
           tokenInfo: {
             t: loginResponse.t || info.t || Date.now(),
             uid: info.uid,
-            expire_time: info.expire_time,
-            access_token: info.access_token,
-            refresh_token: info.refresh_token,
+            expire_time: info.expire_time || info.expireTime || info.expire || 7200,
+            access_token: info.access_token || info.accessToken,
+            refresh_token: info.refresh_token || info.refreshToken,
           },
           username: info.username,
           savedAt: Date.now(),

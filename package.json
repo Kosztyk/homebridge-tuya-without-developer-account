@@ -1,8 +1,8 @@
 {
   "name": "homebridge-tuya-without-developer-account",
   "displayName": "Tuya without developer account for Homebridge",
-  "version": "1.0.0",
-  "description": "Homebridge plugin for Tuya and Smart Life devices using Home Assistant-style QR cloud authentication, without a Tuya IoT developer account.",
+  "version": "1.0.1",
+  "description": "Homebridge plugin for Tuya and Smart Life devices using QR cloud authentication without a Tuya IoT developer account.",
   "license": "MIT",
   "author": "Kosztyk",
   "repository": {

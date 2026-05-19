@@ -13,12 +13,13 @@ exports.TUYA_HA_CLIENT_ID = 'HA_3y9q4ak7g4ephrvke';
 exports.TUYA_HA_SCHEMA = 'haauthorize';
 exports.TUYA_HA_QR_ENDPOINT = 'https://apigw.iotbing.com';
 class TuyaHACloudAPI {
-    constructor(userCode, terminalId, endpoint, tokenInfo, log = console, debug = false) {
+    constructor(userCode, terminalId, endpoint, tokenInfo, log = console, debug = false, tokenUpdateListener) {
         this.userCode = userCode;
         this.terminalId = terminalId;
         this.endpoint = endpoint;
         this.log = log;
         this.debug = debug;
+        this.tokenUpdateListener = tokenUpdateListener;
         this.tokenInfo = {
             access_token: '',
             refresh_token: '',
@@ -31,22 +32,48 @@ class TuyaHACloudAPI {
             this.setTokenInfo(tokenInfo);
         }
     }
-    setTokenInfo(tokenInfo) {
-        this.tokenInfo = {
-            access_token: tokenInfo.access_token,
-            refresh_token: tokenInfo.refresh_token,
-            uid: tokenInfo.uid,
-            expire: (tokenInfo.t || Date.now()) + (tokenInfo.expire_time || 0) * 1000,
+    setTokenUpdateListener(listener) {
+        this.tokenUpdateListener = listener;
+    }
+    normaliseTokenInfo(tokenInfo = {}) {
+        const now = Date.now();
+        const expireTimeRaw = tokenInfo.expire_time ?? tokenInfo.expireTime ?? tokenInfo.expire;
+        const expireTime = Number.isFinite(Number(expireTimeRaw)) && Number(expireTimeRaw) > 0
+            ? Number(expireTimeRaw)
+            : 7200;
+        return {
+            access_token: tokenInfo.access_token || tokenInfo.accessToken || this.tokenInfo.access_token || '',
+            refresh_token: tokenInfo.refresh_token || tokenInfo.refreshToken || this.tokenInfo.refresh_token || '',
+            uid: tokenInfo.uid || this.tokenInfo.uid || '',
+            expire: Number(tokenInfo.expireAt || 0) > now
+                ? Number(tokenInfo.expireAt)
+                : (Number(tokenInfo.t || 0) > 0 ? Number(tokenInfo.t) : now) + expireTime * 1000,
         };
+    }
+    setTokenInfo(tokenInfo) {
+        this.tokenInfo = this.normaliseTokenInfo(tokenInfo);
     }
     exportTokenInfo() {
         return {
             t: Date.now(),
             uid: this.tokenInfo.uid,
             expire_time: Math.max(0, Math.floor((this.tokenInfo.expire - Date.now()) / 1000)),
+            expireAt: this.tokenInfo.expire,
             access_token: this.tokenInfo.access_token,
             refresh_token: this.tokenInfo.refresh_token,
         };
+    }
+    async notifyTokenUpdate() {
+        if (typeof this.tokenUpdateListener !== 'function') {
+            return;
+        }
+        try {
+            await this.tokenUpdateListener(this.exportTokenInfo());
+        }
+        catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.log.warn('Could not persist refreshed Tuya token: %s', msg);
+        }
     }
     isLogin() {
         return this.tokenInfo.access_token.length > 0;
@@ -93,43 +120,52 @@ class TuyaHACloudAPI {
         this.log.debug('HA raw response: %s', JSON.stringify(res));
         return res;
     }
-    async refreshAccessTokenIfNeed() {
+    async refreshAccessTokenIfNeed(force = false) {
         if (!this.isLogin()) {
-            return;
+            return false;
         }
-        if (!this.isTokenExpired()) {
-            return;
+        if (!force && !this.isTokenExpired()) {
+            return false;
         }
         if (this.refreshTokenInProgress) {
-            return;
+            return false;
         }
         this.refreshTokenInProgress = true;
         try {
             this.log.info('Refreshing Tuya Home Assistant QR access token.');
-            const response = await this.get(`/v1.0/m/token/${this.tokenInfo.refresh_token}`);
+            const response = await this.request('GET', `/v1.0/m/token/${this.tokenInfo.refresh_token}`, null, null, { skipRefresh: true, skipSignInvalidRetry: true });
             if (response && response.success) {
                 const result = response.result || {};
                 const tokenInfo = {
                     t: response.t || Date.now(),
-                    expire_time: result.expireTime || result.expire_time || 0,
+                    expire_time: result.expireTime || result.expire_time || result.expire || 7200,
                     uid: result.uid,
                     access_token: result.accessToken || result.access_token,
-                    refresh_token: result.refreshToken || result.refresh_token,
+                    refresh_token: result.refreshToken || result.refresh_token || this.tokenInfo.refresh_token,
                 };
                 this.setTokenInfo(tokenInfo);
+                await this.notifyTokenUpdate();
+                this.log.info('Tuya Home Assistant QR access token refreshed and saved.');
+                return true;
             }
+            this.log.warn('Refresh Tuya access token failed. code=%s, msg=%s', response?.code, response?.msg);
+            return false;
         }
         catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             this.log.error('Failed to refresh Tuya access token: %s', msg);
+            return false;
         }
         finally {
             this.refreshTokenInProgress = false;
         }
     }
-    async request(method, path, params, body) {
-        if (!this.refreshTokenInProgress) {
-            await this.refreshAccessTokenIfNeed();
+    isSignInvalidResponse(res) {
+        return res && res.success === false && (String(res.code) === '-9999999' || String(res.msg || '').toLowerCase().includes('sign invalid'));
+    }
+    async request(method, path, params, body, requestOptions = {}) {
+        if (!requestOptions.skipRefresh && !this.refreshTokenInProgress) {
+            await this.refreshAccessTokenIfNeed(false);
         }
         const rid = (0, util_1.generateUUID)();
         const sid = '';
@@ -199,6 +235,13 @@ class TuyaHACloudAPI {
             req.end();
         }), { retriesMax: 5, interval: 300, exponential: true, factor: 2, jitter: 100 });
         this.log.debug('HA encrypted response: %s', JSON.stringify(res));
+        if (!requestOptions.skipSignInvalidRetry && this.isSignInvalidResponse(res)) {
+            this.log.warn('Tuya returned sign invalid. Forcing token refresh and retrying request once.');
+            const refreshed = await this.refreshAccessTokenIfNeed(true);
+            if (refreshed) {
+                return this.request(method, path, params, body, { ...requestOptions, skipSignInvalidRetry: true });
+            }
+        }
         return res;
     }
     async get(path, params) {
