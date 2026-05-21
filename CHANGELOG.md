@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2
+
+- Fixed startup abort when Homebridge UI saves an empty or incomplete `deviceOverrides` row. Invalid override rows without `id` are now skipped with a warning instead of stopping QR cloud startup.
+- Duplicate device override IDs are now ignored safely, keeping the first valid entry.
+- Invalid or duplicate schema override entries are now skipped with warnings instead of blocking Homebridge startup.
+
 ## 1.0.1
 
 - Fixes repeated `code=-9999999, msg=sign invalid` errors caused by incomplete token expiry handling and non-persistent token refreshes.

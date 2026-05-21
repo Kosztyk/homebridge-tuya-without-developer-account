@@ -68,24 +68,45 @@ class TuyaPlatform {
     if (!this.options.deviceOverrides) {
       return true;
     }
-    const idMap = new Map();
+    if (!Array.isArray(this.options.deviceOverrides)) {
+      this.log.warn('[Tuya QR] Ignoring invalid deviceOverrides value because it is not an array.');
+      this.options.deviceOverrides = [];
+      return true;
+    }
+
+    const validOverrides = [];
+    const seenIds = new Set();
+    let skippedMissingId = 0;
+    let skippedDuplicateId = 0;
+
     for (const item of this.options.deviceOverrides) {
-      if (!item || !item.id) {
-        this.log.error('[Tuya QR] Each device override must include an "id".');
-        return false;
+      if (!item || typeof item !== 'object') {
+        skippedMissingId++;
+        continue;
       }
-      if (idMap.has(item.id)) {
-        idMap.get(item.id).push(item);
-      } else {
-        idMap.set(item.id, [item]);
+      const id = String(item.id || '').trim();
+      if (!id) {
+        skippedMissingId++;
+        continue;
       }
+      if (seenIds.has(id)) {
+        skippedDuplicateId++;
+        this.log.warn('[Tuya QR] Ignoring duplicate device override for id "%s". Keeping the first one.', id);
+        continue;
+      }
+      item.id = id;
+      seenIds.add(id);
+      validOverrides.push(item);
     }
-    for (const items of idMap.values()) {
-      if (items.length > 1) {
-        this.log.error('[Tuya QR] "deviceOverrides" conflict, "id" must be unique: %o.', items);
-        return false;
-      }
+
+    if (skippedMissingId > 0) {
+      this.log.warn('[Tuya QR] Ignored %d invalid device override(s) without an "id". QR cloud startup will continue.', skippedMissingId);
     }
+    if (skippedDuplicateId > 0) {
+      this.log.warn('[Tuya QR] Ignored %d duplicate device override(s). QR cloud startup will continue.', skippedDuplicateId);
+    }
+
+    this.options.deviceOverrides = validOverrides;
     return true;
   }
 
@@ -97,20 +118,43 @@ class TuyaPlatform {
       if (!deviceOverride.schema) {
         continue;
       }
-      const idMap = new Map();
+      if (!Array.isArray(deviceOverride.schema)) {
+        this.log.warn('[Tuya QR] Ignoring invalid schema override for device id "%s" because schema is not an array.', deviceOverride.id);
+        deviceOverride.schema = undefined;
+        continue;
+      }
+      const validSchema = [];
+      const seenCodes = new Set();
+      let skippedMissingCode = 0;
+      let skippedDuplicateCode = 0;
+
       for (const item of deviceOverride.schema) {
-        if (idMap.has(item.code)) {
-          idMap.get(item.code).push(item);
-        } else {
-          idMap.set(item.code, [item]);
+        if (!item || typeof item !== 'object') {
+          skippedMissingCode++;
+          continue;
         }
-      }
-      for (const items of idMap.values()) {
-        if (items.length > 1) {
-          this.log.error('[Tuya QR] "schema" conflict, "code" must be unique: %o.', items);
-          return false;
+        const code = String(item.code || '').trim();
+        if (!code) {
+          skippedMissingCode++;
+          continue;
         }
+        if (seenCodes.has(code)) {
+          skippedDuplicateCode++;
+          this.log.warn('[Tuya QR] Ignoring duplicate schema override code "%s" for device id "%s". Keeping the first one.', code, deviceOverride.id);
+          continue;
+        }
+        item.code = code;
+        seenCodes.add(code);
+        validSchema.push(item);
       }
+
+      if (skippedMissingCode > 0) {
+        this.log.warn('[Tuya QR] Ignored %d invalid schema override(s) without a "code" for device id "%s".', skippedMissingCode, deviceOverride.id);
+      }
+      if (skippedDuplicateCode > 0) {
+        this.log.warn('[Tuya QR] Ignored %d duplicate schema override(s) for device id "%s".', skippedDuplicateCode, deviceOverride.id);
+      }
+      deviceOverride.schema = validSchema;
     }
     return true;
   }

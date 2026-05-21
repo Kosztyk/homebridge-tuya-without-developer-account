@@ -192,6 +192,11 @@ Use `
 
 ## Troubleshooting
 
+### Plugin starts from cache only and logs `Each device override must include an "id"`
+
+Version 1.0.2 and newer no longer abort startup for empty override rows created by the Homebridge UI. Invalid override entries are skipped with a warning. If you still see old warnings, remove empty rows from the Device Overrides section in the plugin settings and restart Homebridge.
+
+
 ### The QR code does not appear
 
 Make sure you opened the settings for this plugin, not another Tuya plugin. The plugin name should be:
