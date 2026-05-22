@@ -13,6 +13,161 @@ function normaliseUserCode(userCode) {
   return String(userCode || '').trim();
 }
 
+function firstString(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) {
+      continue;
+    }
+    const text = String(value).trim();
+    if (text) {
+      return text;
+    }
+  }
+  return '';
+}
+
+function looksLikeAirConditioner(device) {
+  const haystack = [
+    device.name,
+    device.category,
+    device.productName,
+    device.productId,
+    device.model,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return [
+    'air conditioner',
+    'airconditioner',
+    'aircon',
+    'a/c',
+    'ac ',
+    ' ac',
+    'clima',
+    'climă',
+    'aer conditionat',
+    'aer condiționat',
+    'hvac',
+  ].some((needle) => haystack.includes(needle))
+    || ['kt', 'wk', 'air_conditioner', 'airconditioner'].includes(String(device.category || '').toLowerCase());
+}
+
+function collectDevicesFromObject(root) {
+  const byId = new Map();
+
+  function addDevice(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return;
+    }
+
+    const id = firstString(
+      obj.id,
+      obj.devId,
+      obj.dev_id,
+      obj.deviceId,
+      obj.device_id,
+      obj.uid,
+    );
+
+    const name = firstString(
+      obj.name,
+      obj.deviceName,
+      obj.device_name,
+      obj.customName,
+      obj.custom_name,
+      obj.title,
+    );
+
+    if (!id || !name) {
+      return;
+    }
+
+    // Avoid adding automation scenes as selectable devices.
+    if (obj.scene_id || obj.sceneId || obj.rule_id || obj.ruleId) {
+      return;
+    }
+
+    const category = firstString(
+      obj.category,
+      obj.categoryCode,
+      obj.category_code,
+      obj.productCategory,
+      obj.product_category,
+    );
+
+    const productName = firstString(
+      obj.productName,
+      obj.product_name,
+      obj.product,
+      obj.productTitle,
+    );
+
+    const productId = firstString(
+      obj.productId,
+      obj.product_id,
+      obj.pid,
+    );
+
+    const model = firstString(obj.model, obj.modelId, obj.model_id);
+
+    const status = Array.isArray(obj.status) ? obj.status : [];
+    const statusCodes = status
+      .map((item) => item && typeof item === 'object' ? firstString(item.code) : '')
+      .filter(Boolean);
+
+    const schema = Array.isArray(obj.schema) ? obj.schema : Array.isArray(obj.schemas) ? obj.schemas : [];
+    const schemaCodes = schema
+      .map((item) => item && typeof item === 'object' ? firstString(item.code) : '')
+      .filter(Boolean);
+
+    const existing = byId.get(id) || {};
+    const merged = {
+      id,
+      name: existing.name || name,
+      category: existing.category || category || null,
+      productName: existing.productName || productName || null,
+      productId: existing.productId || productId || null,
+      model: existing.model || model || null,
+      online: typeof obj.online === 'boolean' ? obj.online : existing.online,
+      statusCodes: Array.from(new Set([...(existing.statusCodes || []), ...statusCodes])).sort(),
+      schemaCodes: Array.from(new Set([...(existing.schemaCodes || []), ...schemaCodes])).sort(),
+    };
+    merged.likelyAirConditioner = looksLikeAirConditioner(merged)
+      || merged.statusCodes.includes('temp_set')
+      || merged.schemaCodes.includes('temp_set');
+    merged.label = `${merged.name} (${merged.id})`;
+    byId.set(id, merged);
+  }
+
+  function walk(value) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        walk(item);
+      }
+      return;
+    }
+    if (!value || typeof value !== 'object') {
+      return;
+    }
+
+    addDevice(value);
+
+    for (const child of Object.values(value)) {
+      if (child && typeof child === 'object') {
+        walk(child);
+      }
+    }
+  }
+
+  walk(root);
+
+  return Array.from(byId.values()).sort((a, b) => {
+    if (a.likelyAirConditioner !== b.likelyAirConditioner) {
+      return a.likelyAirConditioner ? -1 : 1;
+    }
+    return String(a.name).localeCompare(String(b.name));
+  });
+}
+
 (async () => {
   const { HomebridgePluginUiServer, RequestError } = await import('@homebridge/plugin-ui-utils');
 
@@ -24,6 +179,7 @@ function normaliseUserCode(userCode) {
       this.onRequest('/qr/status', this.qrStatus.bind(this));
       this.onRequest('/auth/status', this.authStatus.bind(this));
       this.onRequest('/auth/clear', this.clearAuth.bind(this));
+      this.onRequest('/devices/list', this.listDevices.bind(this));
       this.ready();
     }
 
@@ -56,6 +212,63 @@ function normaliseUserCode(userCode) {
       await fs.promises.mkdir(path.dirname(file), { recursive: true });
       await fs.promises.writeFile(file, JSON.stringify(data, null, 2), { mode: 0o600 });
       return file;
+    }
+
+    async listDevices() {
+      const persistDir = path.join(this.homebridgeStoragePath, 'persist');
+      let entries;
+      try {
+        entries = await fs.promises.readdir(persistDir, { withFileTypes: true });
+      } catch (err) {
+        if (err && err.code === 'ENOENT') {
+          return { devices: [], files: [], message: 'No Homebridge persist directory found yet. Authenticate and restart Homebridge once so the plugin can save a device list.' };
+        }
+        throw err;
+      }
+
+      const candidates = [];
+      for (const entry of entries) {
+        if (!entry.isFile()) {
+          continue;
+        }
+        if (!/^TuyaDeviceList.*\.json$/i.test(entry.name)) {
+          continue;
+        }
+        const file = path.join(persistDir, entry.name);
+        const stat = await fs.promises.stat(file);
+        candidates.push({ file, mtimeMs: stat.mtimeMs });
+      }
+
+      candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+      const allDevices = new Map();
+      const errors = [];
+      for (const candidate of candidates) {
+        try {
+          const data = JSON.parse(await fs.promises.readFile(candidate.file, 'utf8'));
+          for (const device of collectDevicesFromObject(data)) {
+            if (!allDevices.has(device.id)) {
+              allDevices.set(device.id, device);
+            }
+          }
+        } catch (err) {
+          errors.push({ file: candidate.file, message: err.message });
+        }
+      }
+
+      const devices = Array.from(allDevices.values()).sort((a, b) => {
+        if (a.likelyAirConditioner !== b.likelyAirConditioner) {
+          return a.likelyAirConditioner ? -1 : 1;
+        }
+        return String(a.name).localeCompare(String(b.name));
+      });
+
+      return {
+        devices,
+        files: candidates.map((item) => item.file),
+        errors,
+        message: devices.length ? `Loaded ${devices.length} Tuya device(s) from Homebridge persist cache.` : 'No devices found in TuyaDeviceList cache yet. Authenticate and restart Homebridge once, then reopen this settings page.',
+      };
     }
 
     async authStatus(payload = {}) {

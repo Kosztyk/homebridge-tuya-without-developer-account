@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.4
+
+- Added a Homebridge settings UI helper for air conditioner temperature overrides.
+- Users can now select a detected Tuya device by name instead of manually finding and pasting the device ID.
+- Added a backend UI endpoint that reads the cached Tuya device list from Homebridge `persist/TuyaDeviceList*.json`.
+- AC-looking devices are listed first when metadata suggests they are air conditioners.
+- The UI writes the correct `deviceOverrides[].id` automatically and saves `airConditioner.minTemperature`, `airConditioner.maxTemperature`, and `airConditioner.temperatureStep`.
+
+## 1.0.3
+
+- Added user-friendly air conditioner temperature limit overrides under `deviceOverrides[].airConditioner`.
+- Allows per-device HomeKit AC setpoint limits such as 16-31 °C or 17-31 °C.
+- Allows `temperatureStep: 1` to suppress 0.5 °C steps in the Home app.
+- Values are always configured in Celsius; Fahrenheit users see the Home app converted values automatically.
+
 ## 1.0.2
 
 - Fixed startup abort when Homebridge UI saves an empty or incomplete `deviceOverrides` row. Invalid override rows without `id` are now skipped with a warning instead of stopping QR cloud startup.

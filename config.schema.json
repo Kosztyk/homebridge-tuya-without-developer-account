@@ -81,6 +81,35 @@
                       }
                     }
                   }
+                },
+                "airConditioner": {
+                  "type": "object",
+                  "title": "Air Conditioner Temperature Limits",
+                  "description": "Optional HomeKit temperature range override for Wi-Fi air conditioners. Values are always Celsius; Home app converts to Fahrenheit automatically for users using \u00b0F.",
+                  "properties": {
+                    "minTemperature": {
+                      "type": "number",
+                      "title": "Minimum temperature (\u00b0C)",
+                      "description": "Lowest setpoint exposed to HomeKit. Common values are 16 or 17. Leave empty to use Tuya schema.",
+                      "minimum": 0,
+                      "maximum": 50
+                    },
+                    "maxTemperature": {
+                      "type": "number",
+                      "title": "Maximum temperature (\u00b0C)",
+                      "description": "Highest setpoint exposed to HomeKit. Common value is 31. Leave empty to use Tuya schema.",
+                      "minimum": 0,
+                      "maximum": 60
+                    },
+                    "temperatureStep": {
+                      "type": "number",
+                      "title": "Temperature step (\u00b0C)",
+                      "description": "Set to 1 to suppress 0.5 \u00b0C steps. Values are Celsius even when Home app displays Fahrenheit.",
+                      "minimum": 0.1,
+                      "maximum": 5,
+                      "default": 1
+                    }
+                  }
                 }
               },
               "required": [

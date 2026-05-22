@@ -187,8 +187,62 @@ Optional. Use only when a device is discovered with the wrong category or requir
 }
 ```
 
-Use `
-`global` as the override ID to apply an override globally.
+Use `global` as the override ID to apply an override globally.
+
+### Air conditioner temperature limits
+
+Optional. For Wi-Fi AC units, you can limit the Home app setpoint range and step size. Values are always configured in Celsius. If the iPhone/Home app is set to Fahrenheit, HomeKit converts the values automatically.
+
+The preferred method is the Homebridge plugin settings UI:
+
+1. Authenticate and let the plugin discover devices at least once.
+2. Open **Plugins → Tuya without developer account for Homebridge → Settings**.
+3. In **Air Conditioner Temperature Overrides**, click **Load Detected Devices**.
+4. Select the AC device by name, for example **Bedroom AC**.
+5. Enter:
+
+```text
+Min Temperature: 17
+Max Temperature: 31
+Step: 1
+```
+
+6. Click **Add / Update AC Override**.
+7. Click **Save Configuration** and restart Homebridge.
+
+The UI automatically saves the correct Tuya device ID. Users no longer need to manually find and paste the device ID for this AC override.
+
+The saved config looks like this internally:
+
+```json
+{
+  "options": {
+    "userCode": "YOUR_TUYA_USER_CODE",
+    "deviceOverrides": [
+      {
+        "id": "THE_SELECTED_AC_DEVICE_ID",
+        "airConditioner": {
+          "minTemperature": 17,
+          "maxTemperature": 31,
+          "temperatureStep": 1
+        }
+      }
+    ]
+  }
+}
+```
+
+For ACs that support 16 °C minimum, set **Min Temperature** to `16`.
+
+Fahrenheit display examples:
+
+```text
+16 °C ≈ 61 °F
+17 °C ≈ 63 °F
+31 °C ≈ 88 °F
+```
+
+HomeKit stores temperature characteristic metadata in Celsius. Do not enter Fahrenheit values in the plugin config.
 
 ## Troubleshooting
 

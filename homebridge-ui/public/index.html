@@ -39,7 +39,8 @@
     font-size: 0.875rem;
     opacity: 0.85;
   }
-  .tuya-nodev-status {
+  .tuya-nodev-status,
+  .tuya-nodev-ac-status {
     margin-top: 12px;
   }
   .tuya-nodev-raw {
@@ -48,6 +49,32 @@
     font-family: monospace;
     font-size: 0.8rem;
     margin-top: 8px;
+  }
+  .tuya-nodev-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .tuya-nodev-table-wrap {
+    overflow-x: auto;
+    margin-top: 12px;
+  }
+  .tuya-nodev-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  .tuya-nodev-table th,
+  .tuya-nodev-table td {
+    border-bottom: 1px solid rgba(127, 127, 127, 0.2);
+    padding: 8px;
+    vertical-align: middle;
+  }
+  .tuya-nodev-table th {
+    text-align: left;
+  }
+  .tuya-nodev-muted-option {
+    opacity: 0.75;
   }
 </style>
 
@@ -87,18 +114,83 @@
   </div>
 </div>
 
+<div class="tuya-nodev-card">
+  <div class="tuya-nodev-title">Air Conditioner Temperature Overrides</div>
+  <p class="tuya-nodev-small mb-3">
+    Select a discovered Tuya AC device and set the Home app temperature range. Values are always Celsius; iOS/Home automatically displays Fahrenheit for users who use °F.
+  </p>
+
+  <div class="form-group">
+    <label for="tuyaNodevAcDevice">Select Device</label>
+    <select id="tuyaNodevAcDevice" class="form-control">
+      <option value="">Load devices first...</option>
+    </select>
+    <small class="form-text text-muted">AC-looking devices are listed first when the cached Tuya device list contains enough metadata.</small>
+  </div>
+
+  <div class="tuya-nodev-grid">
+    <div class="form-group">
+      <label for="tuyaNodevAcMin">Min Temperature (°C)</label>
+      <input id="tuyaNodevAcMin" class="form-control" type="number" min="0" max="50" step="0.1" value="17">
+    </div>
+    <div class="form-group">
+      <label for="tuyaNodevAcMax">Max Temperature (°C)</label>
+      <input id="tuyaNodevAcMax" class="form-control" type="number" min="0" max="60" step="0.1" value="31">
+    </div>
+    <div class="form-group">
+      <label for="tuyaNodevAcStep">Step (°C)</label>
+      <input id="tuyaNodevAcStep" class="form-control" type="number" min="0.1" max="5" step="0.1" value="1">
+    </div>
+  </div>
+
+  <div class="tuya-nodev-actions">
+    <button id="tuyaNodevLoadDevices" class="btn btn-outline-primary" type="button">Load Detected Devices</button>
+    <button id="tuyaNodevApplyAc" class="btn btn-primary" type="button">Add / Update AC Override</button>
+    <button id="tuyaNodevRemoveAc" class="btn btn-outline-danger" type="button">Remove Selected AC Override</button>
+  </div>
+
+  <div id="tuyaNodevAcStatus" class="tuya-nodev-ac-status alert alert-secondary">
+    Load detected devices after the plugin has authenticated and discovered your Tuya devices at least once.
+  </div>
+
+  <div class="tuya-nodev-table-wrap">
+    <table class="tuya-nodev-table">
+      <thead>
+        <tr>
+          <th>Device</th>
+          <th>Device ID</th>
+          <th>Min</th>
+          <th>Max</th>
+          <th>Step</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tuyaNodevAcOverrideRows">
+        <tr><td colspan="6" class="tuya-nodev-small">No AC overrides configured.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 <script>
 (() => {
   const PLATFORM = 'TuyaNoDeveloperAccount';
   let currentConfig = null;
   let pollTimer = null;
   let isAuthenticated = false;
+  let detectedDevices = [];
 
   const $ = (id) => document.getElementById(id);
 
   function setStatus(message, type = 'info') {
     const el = $('tuyaNodevStatus');
     el.className = `tuya-nodev-status alert alert-${type}`;
+    el.textContent = message;
+  }
+
+  function setAcStatus(message, type = 'secondary') {
+    const el = $('tuyaNodevAcStatus');
+    el.className = `tuya-nodev-ac-status alert alert-${type}`;
     el.textContent = message;
   }
 
@@ -110,13 +202,20 @@
     return $('tuyaNodevName').value.trim() || 'Tuya without developer account';
   }
 
+  function clone(value) {
+    return value && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value;
+  }
+
   function normaliseConfig(base) {
-    const cfg = base && typeof base === 'object' ? JSON.parse(JSON.stringify(base)) : {};
+    const cfg = base && typeof base === 'object' ? clone(base) : {};
     cfg.platform = PLATFORM;
     cfg.name = getPlatformName();
     cfg.options = cfg.options && typeof cfg.options === 'object' ? cfg.options : {};
     cfg.options.userCode = getUserCode();
     cfg.options.projectType = '3';
+    if (!Array.isArray(cfg.options.deviceOverrides)) {
+      cfg.options.deviceOverrides = [];
+    }
     delete cfg.options.accessId;
     delete cfg.options.accessKey;
     delete cfg.options.username;
@@ -128,9 +227,15 @@
     return cfg;
   }
 
-  async function syncConfigToUi() {
+  function ensureConfig() {
     currentConfig = normaliseConfig(currentConfig);
+    return currentConfig;
+  }
+
+  async function syncConfigToUi() {
+    ensureConfig();
     await homebridge.updatePluginConfig([currentConfig]);
+    renderAcOverrides();
   }
 
   function stopPolling() {
@@ -148,6 +253,195 @@
   function enableSaving() {
     $('tuyaNodevSave').disabled = false;
     if (homebridge.enableSaveButton) homebridge.enableSaveButton();
+  }
+
+  function getDeviceName(id) {
+    const device = detectedDevices.find((item) => item.id === id);
+    return device ? device.name : '';
+  }
+
+  function getAcOverrides() {
+    const cfg = ensureConfig();
+    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id && item.airConditioner && typeof item.airConditioner === 'object');
+  }
+
+  function isOnlyAcOverride(item) {
+    const keys = Object.keys(item || {}).filter((key) => item[key] !== undefined && item[key] !== null && item[key] !== '');
+    return keys.every((key) => ['id', 'airConditioner'].includes(key));
+  }
+
+  function renderAcOverrides() {
+    const tbody = $('tuyaNodevAcOverrideRows');
+    const overrides = getAcOverrides();
+    if (!overrides.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="tuya-nodev-small">No AC overrides configured.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = overrides.map((override) => {
+      const ac = override.airConditioner || {};
+      const name = getDeviceName(override.id) || 'Unknown / not in detected cache';
+      return `
+        <tr>
+          <td>${escapeHtml(name)}</td>
+          <td><code>${escapeHtml(override.id)}</code></td>
+          <td>${escapeHtml(ac.minTemperature ?? '')} °C</td>
+          <td>${escapeHtml(ac.maxTemperature ?? '')} °C</td>
+          <td>${escapeHtml(ac.temperatureStep ?? '')} °C</td>
+          <td><button class="btn btn-sm btn-outline-secondary tuya-nodev-edit-ac" type="button" data-id="${escapeHtml(override.id)}">Edit</button></td>
+        </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.tuya-nodev-edit-ac').forEach((button) => {
+      button.addEventListener('click', () => editAcOverride(button.getAttribute('data-id')));
+    });
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function parseNumberInput(id, label) {
+    const raw = $(id).value;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      throw new Error(`${label} must be a number.`);
+    }
+    return value;
+  }
+
+  function populateDeviceSelect(devices) {
+    const select = $('tuyaNodevAcDevice');
+    const current = select.value;
+    if (!devices.length) {
+      select.innerHTML = '<option value="">No detected devices found</option>';
+      return;
+    }
+
+    select.innerHTML = '<option value="">Select a Tuya device...</option>' + devices.map((device) => {
+      const tag = device.likelyAirConditioner ? 'AC candidate' : (device.category || 'device');
+      const text = `${device.name} — ${tag} — ${device.id}`;
+      return `<option value="${escapeHtml(device.id)}">${escapeHtml(text)}</option>`;
+    }).join('');
+
+    if (current && devices.some((device) => device.id === current)) {
+      select.value = current;
+    }
+  }
+
+  async function loadDetectedDevices(showToast = true) {
+    try {
+      homebridge.showSpinner();
+      const res = await homebridge.request('/devices/list', {});
+      detectedDevices = Array.isArray(res.devices) ? res.devices : [];
+      populateDeviceSelect(detectedDevices);
+      renderAcOverrides();
+      const acCount = detectedDevices.filter((device) => device.likelyAirConditioner).length;
+      setAcStatus(`${res.message || 'Device list loaded.'} ${acCount ? `${acCount} AC candidate(s) listed first.` : ''}`.trim(), detectedDevices.length ? 'success' : 'warning');
+      if (showToast) homebridge.toast.success(`Loaded ${detectedDevices.length} detected Tuya device(s).`, 'Tuya');
+    } catch (e) {
+      setAcStatus(e.message || 'Failed to load detected devices.', 'danger');
+      if (showToast) homebridge.toast.error(e.message || 'Failed to load detected devices.', 'Tuya');
+    } finally {
+      homebridge.hideSpinner();
+    }
+  }
+
+  function editAcOverride(id) {
+    const override = getAcOverrides().find((item) => item.id === id);
+    if (!override) {
+      return;
+    }
+    const device = detectedDevices.find((item) => item.id === id);
+    if (!device) {
+      const select = $('tuyaNodevAcDevice');
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = `${id} — not currently in detected device cache`;
+      select.appendChild(option);
+    }
+    $('tuyaNodevAcDevice').value = id;
+    $('tuyaNodevAcMin').value = override.airConditioner.minTemperature ?? 17;
+    $('tuyaNodevAcMax').value = override.airConditioner.maxTemperature ?? 31;
+    $('tuyaNodevAcStep').value = override.airConditioner.temperatureStep ?? 1;
+    setAcStatus(`Editing AC override for ${device?.name || id}.`, 'info');
+  }
+
+  async function addOrUpdateAcOverride() {
+    try {
+      const id = $('tuyaNodevAcDevice').value.trim();
+      if (!id) {
+        setAcStatus('Select a Tuya device first.', 'warning');
+        return;
+      }
+      const minTemperature = parseNumberInput('tuyaNodevAcMin', 'Minimum temperature');
+      const maxTemperature = parseNumberInput('tuyaNodevAcMax', 'Maximum temperature');
+      const temperatureStep = parseNumberInput('tuyaNodevAcStep', 'Temperature step');
+      if (temperatureStep <= 0) {
+        throw new Error('Temperature step must be greater than 0.');
+      }
+      if (minTemperature > maxTemperature) {
+        throw new Error('Minimum temperature cannot be greater than maximum temperature.');
+      }
+
+      const cfg = ensureConfig();
+      const overrides = cfg.options.deviceOverrides;
+      let override = overrides.find((item) => item && String(item.id || '').trim() === id);
+      if (!override) {
+        override = { id };
+        overrides.push(override);
+      }
+      override.id = id;
+      override.airConditioner = { minTemperature, maxTemperature, temperatureStep };
+
+      await syncConfigToUi();
+      const name = getDeviceName(id) || id;
+      setAcStatus(`AC override saved in plugin config for ${name}: ${minTemperature}–${maxTemperature} °C, step ${temperatureStep} °C. Click Save Configuration when ready.`, 'success');
+      homebridge.toast.success('AC temperature override added to config.', 'Tuya');
+      if (isAuthenticated) {
+        enableSaving();
+      }
+    } catch (e) {
+      setAcStatus(e.message || 'Failed to add AC override.', 'danger');
+    }
+  }
+
+  async function removeSelectedAcOverride() {
+    const id = $('tuyaNodevAcDevice').value.trim();
+    if (!id) {
+      setAcStatus('Select a Tuya device first.', 'warning');
+      return;
+    }
+
+    const cfg = ensureConfig();
+    const before = cfg.options.deviceOverrides.length;
+    cfg.options.deviceOverrides = cfg.options.deviceOverrides.flatMap((item) => {
+      if (!item || String(item.id || '').trim() !== id) {
+        return [item];
+      }
+      if (isOnlyAcOverride(item)) {
+        return [];
+      }
+      const copy = clone(item);
+      delete copy.airConditioner;
+      return [copy];
+    });
+
+    await syncConfigToUi();
+    if (cfg.options.deviceOverrides.length === before) {
+      setAcStatus('No AC override existed for the selected device.', 'warning');
+    } else {
+      setAcStatus('Selected AC override was removed from the plugin config. Click Save Configuration when ready.', 'success');
+      homebridge.toast.success('AC temperature override removed from config.', 'Tuya');
+    }
+    if (isAuthenticated) {
+      enableSaving();
+    }
   }
 
   async function checkAuth(showSuccessToast = false) {
@@ -286,12 +580,9 @@
         platform: PLATFORM,
         name: 'Tuya without developer account',
         mode: 'cloud',
-        options: { projectType: '3' },
+        options: { projectType: '3', deviceOverrides: [] },
       };
-      currentConfig.platform = PLATFORM;
-      currentConfig.mode = 'cloud';
-      currentConfig.options = currentConfig.options || {};
-      currentConfig.options.projectType = '3';
+      ensureConfig();
       $('tuyaNodevName').value = currentConfig.name || 'Tuya without developer account';
       $('tuyaNodevUserCode').value = currentConfig.options?.userCode || '';
 
@@ -301,12 +592,10 @@
         const block = Array.isArray(data) ? data[0] : data;
         if (block && typeof block === 'object') {
           currentConfig = block;
-          currentConfig.platform = PLATFORM;
-          currentConfig.mode = 'cloud';
-          currentConfig.options = currentConfig.options || {};
-          currentConfig.options.projectType = '3';
+          ensureConfig();
           if (block.name) $('tuyaNodevName').value = block.name;
           if (block.options?.userCode) $('tuyaNodevUserCode').value = block.options.userCode;
+          renderAcOverrides();
         }
       });
 
@@ -320,8 +609,12 @@
         disableSaving();
         syncConfigToUi();
       });
+      $('tuyaNodevLoadDevices').addEventListener('click', () => loadDetectedDevices(true));
+      $('tuyaNodevApplyAc').addEventListener('click', addOrUpdateAcOverride);
+      $('tuyaNodevRemoveAc').addEventListener('click', removeSelectedAcOverride);
 
       await syncConfigToUi();
+      await loadDetectedDevices(false);
       if (getUserCode()) {
         await checkAuth(false);
       } else {

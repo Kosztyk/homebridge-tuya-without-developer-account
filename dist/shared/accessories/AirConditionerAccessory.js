@@ -234,18 +234,49 @@ class AirConditionerAccessory extends BaseAccessory_1.default {
         })
             .setProps({ validValues });
     }
+    getAirConditionerTemperatureProps(schema) {
+        const property = schema.property || {};
+        const multiple = Math.pow(10, property.scale || 0);
+        const props = {
+            minValue: Number.isFinite(Number(property.min)) ? Number(property.min) / multiple : 16,
+            maxValue: Number.isFinite(Number(property.max)) ? Number(property.max) / multiple : 31,
+            minStep: Math.max(0.1, Number.isFinite(Number(property.step)) ? Number(property.step) / multiple : 1),
+        };
+        const deviceConfig = this.platform.getDeviceConfig?.(this.device);
+        const airConditioner = deviceConfig?.airConditioner;
+        if (airConditioner && typeof airConditioner === 'object') {
+            const minTemperature = Number(airConditioner.minTemperature);
+            const maxTemperature = Number(airConditioner.maxTemperature);
+            const temperatureStep = Number(airConditioner.temperatureStep);
+            if (Number.isFinite(minTemperature)) {
+                props.minValue = minTemperature;
+            }
+            if (Number.isFinite(maxTemperature)) {
+                props.maxValue = maxTemperature;
+            }
+            if (Number.isFinite(temperatureStep) && temperatureStep > 0) {
+                props.minStep = Math.max(0.1, temperatureStep);
+            }
+            if (props.minValue > props.maxValue) {
+                this.log.warn('Invalid airConditioner temperature override: minTemperature %s is greater than maxTemperature %s. Swapping values.', props.minValue, props.maxValue);
+                const oldMin = props.minValue;
+                props.minValue = props.maxValue;
+                props.maxValue = oldMin;
+            }
+            this.log.info('Using air conditioner HomeKit temperature override: min=%s°C, max=%s°C, step=%s°C. Fahrenheit users will see the Home app converted values automatically.', props.minValue, props.maxValue, props.minStep);
+        }
+        return { props, multiple };
+    }
+    normalizeTemperatureCommandValue(value, props, multiple) {
+        const clamped = (0, util_1.limit)(Number(value), props.minValue, props.maxValue);
+        return Math.round(clamped * multiple);
+    }
     configureCoolingThreshouldTemp() {
         const schema = this.getSchema(...SCHEMA_CODE.TARGET_TEMP);
         if (!schema) {
             return;
         }
-        const property = schema.property;
-        const multiple = Math.pow(10, property.scale);
-        const props = {
-            minValue: property.min / multiple,
-            maxValue: property.max / multiple,
-            minStep: Math.max(0.1, property.step / multiple),
-        };
+        const { props, multiple } = this.getAirConditionerTemperatureProps(schema);
         this.log.debug('Set props for CoolingThresholdTemperature:', props);
         this.mainService().getCharacteristic(this.Characteristic.CoolingThresholdTemperature)
             .onGet(() => {
@@ -264,7 +295,7 @@ class AirConditionerAccessory extends BaseAccessory_1.default {
                     .updateValue(props.minValue);
                 return;
             }
-            await this.sendCommands([{ code: schema.code, value: value * multiple }], true);
+            await this.sendCommands([{ code: schema.code, value: this.normalizeTemperatureCommandValue(value, props, multiple) }], true);
         })
             .setProps(props);
     }
@@ -273,13 +304,7 @@ class AirConditionerAccessory extends BaseAccessory_1.default {
         if (!schema) {
             return;
         }
-        const property = schema.property;
-        const multiple = Math.pow(10, property.scale);
-        const props = {
-            minValue: property.min / multiple,
-            maxValue: property.max / multiple,
-            minStep: Math.max(0.1, property.step / multiple),
-        };
+        const { props, multiple } = this.getAirConditionerTemperatureProps(schema);
         this.log.debug('Set props for HeatingThresholdTemperature:', props);
         this.mainService().getCharacteristic(this.Characteristic.HeatingThresholdTemperature)
             .onGet(() => {
@@ -298,7 +323,7 @@ class AirConditionerAccessory extends BaseAccessory_1.default {
                     .updateValue(props.maxValue);
                 return;
             }
-            await this.sendCommands([{ code: schema.code, value: value * multiple }], true);
+            await this.sendCommands([{ code: schema.code, value: this.normalizeTemperatureCommandValue(value, props, multiple) }], true);
         })
             .setProps(props);
     }

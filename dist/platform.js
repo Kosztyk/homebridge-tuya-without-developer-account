@@ -95,6 +95,33 @@ class TuyaPlatform {
         continue;
       }
       item.id = id;
+      if (item.airConditioner && typeof item.airConditioner === 'object') {
+        const normalizedAirConditioner = {};
+        const minTemperature = Number(item.airConditioner.minTemperature);
+        const maxTemperature = Number(item.airConditioner.maxTemperature);
+        const temperatureStep = Number(item.airConditioner.temperatureStep);
+        if (Number.isFinite(minTemperature)) {
+          normalizedAirConditioner.minTemperature = minTemperature;
+        }
+        if (Number.isFinite(maxTemperature)) {
+          normalizedAirConditioner.maxTemperature = maxTemperature;
+        }
+        if (Number.isFinite(temperatureStep) && temperatureStep > 0) {
+          normalizedAirConditioner.temperatureStep = temperatureStep;
+        }
+        if (Number.isFinite(normalizedAirConditioner.minTemperature) && Number.isFinite(normalizedAirConditioner.maxTemperature) && normalizedAirConditioner.minTemperature > normalizedAirConditioner.maxTemperature) {
+          this.log.warn('[Tuya QR] Air conditioner override for id "%s" has minTemperature greater than maxTemperature. Swapping values.', id);
+          const oldMin = normalizedAirConditioner.minTemperature;
+          normalizedAirConditioner.minTemperature = normalizedAirConditioner.maxTemperature;
+          normalizedAirConditioner.maxTemperature = oldMin;
+        }
+        if (Object.keys(normalizedAirConditioner).length > 0) {
+          item.airConditioner = normalizedAirConditioner;
+        } else {
+          this.log.warn('[Tuya QR] Ignoring invalid airConditioner override for id "%s" because no numeric temperature values were provided.', id);
+          delete item.airConditioner;
+        }
+      }
       seenIds.add(id);
       validOverrides.push(item);
     }
@@ -221,6 +248,7 @@ class TuyaPlatform {
         customCategory: deviceConfig?.category,
         unbridged: deviceConfig?.unbridged ?? false,
         schemaOverrides: deviceConfig?.schema ? JSON.stringify(deviceConfig.schema) : undefined,
+        airConditioner: deviceConfig?.airConditioner ? JSON.stringify(deviceConfig.airConditioner) : undefined,
         adaptiveLighting: deviceConfig?.adaptiveLighting ?? false,
       };
       const { changed: configChanged } = this.configHash.hasConfigChanged(device.id, configToHash);
