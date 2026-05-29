@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.6
+
+- Fixed a Homebridge UI issue where clicking **Save Configuration** could leave the custom settings page spinner running indefinitely even when QR authentication data had already been saved.
+- Added timeout handling around the custom UI save flow.
+- Added post-save verification of the plugin config so users receive a clear success or recovery message instead of a permanent spinner.
+
+
+## 1.0.5
+
+- Added support for DP10 / category `tgq` Tuya dimmer plugs that expose `switch_led` + `bright_value_v2`.
+- Fixed dimmer validation so devices using `bright_value_v2` are exposed as HomeKit Lightbulb accessories with On and Brightness instead of being marked unsupported.
+- Fixed dimmer on/off schema matching so `bright_value_v2` no longer incorrectly searches for `switch_v2` / `switch_led_v2`.
+
 ## 1.0.4
 
 - Added a Homebridge settings UI helper for air conditioner temperature overrides.

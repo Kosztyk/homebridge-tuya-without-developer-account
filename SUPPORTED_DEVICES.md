@@ -204,3 +204,13 @@ Most category code is pinyin abbreviation of Chinese name.
 
 
 For the undocumented product category, you can try override it to the most similar one. See [ADVANCED_OPTIONS.md](./ADVANCED_OPTIONS.md).
+
+### DP10 / Treatlife Smart Dimmer Plug
+
+Supported from **v1.0.5**. These devices normally report category `tgq` and expose:
+
+- `switch_led` for On/Off
+- `bright_value_v2` for Brightness
+
+They are exposed to HomeKit as a Lightbulb with On and Brightness. After upgrading from an older version where the device showed as unsupported, remove the affected cached accessory from Homebridge UI and restart Homebridge.
+

@@ -554,15 +554,92 @@
     }
   }
 
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function withTimeout(promise, timeoutMs, timeoutMessage) {
+    let timer;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  async function verifySavedConfig(userCode) {
+    const blocks = await withTimeout(
+      homebridge.getPluginConfig(),
+      8000,
+      'Configuration save timed out while verifying the saved plugin config.'
+    );
+    const block = Array.isArray(blocks) && blocks.length > 0 ? blocks[0] : blocks;
+    return !!(block && block.platform === PLATFORM && block.options && block.options.userCode === userCode);
+  }
+
   async function saveConfig() {
     if (!isAuthenticated) {
       setStatus('Scan and approve the QR code before saving.', 'warning');
       return;
     }
+
+    const userCode = getUserCode();
+    if (!userCode) {
+      setStatus('User Code is required before saving.', 'warning');
+      return;
+    }
+
     try {
       homebridge.showSpinner();
-      await syncConfigToUi();
-      await homebridge.savePluginConfig();
+      $('tuyaNodevSave').disabled = true;
+
+      await withTimeout(
+        syncConfigToUi(),
+        8000,
+        'Timed out while preparing the plugin configuration for saving.'
+      );
+
+      // Some Homebridge UI versions have been observed to save the config but never resolve
+      // savePluginConfig(), which leaves the custom UI spinner running forever. Timeout the
+      // UI call, then verify the saved config before showing the final result.
+      let saveTimedOut = false;
+      try {
+        await withTimeout(
+          homebridge.savePluginConfig(),
+          15000,
+          'Homebridge UI did not finish the save request in time.'
+        );
+      } catch (e) {
+        saveTimedOut = true;
+      }
+
+      let verified = false;
+      try {
+        await delay(750);
+        verified = await verifySavedConfig(userCode);
+      } catch (e) {
+        verified = false;
+      }
+
+      if (saveTimedOut && !verified) {
+        throw new Error('Save did not complete. The QR auth token is saved, but the plugin configuration could not be verified. Close this window, refresh Homebridge UI, and check whether the config was saved.');
+      }
+
+      if (saveTimedOut && verified) {
+        const message = 'Configuration appears to be saved, but Homebridge UI did not return a save confirmation. Close this settings window and restart Homebridge.';
+        homebridge.toast.success(message, 'Tuya');
+        setStatus(message, 'success');
+        return;
+      }
+
       homebridge.toast.success('Configuration saved. Restart Homebridge to load devices.', 'Tuya');
       setStatus('Configuration saved. Restart Homebridge to load devices.', 'success');
     } catch (e) {
@@ -570,6 +647,9 @@
       homebridge.toast.error(e.message || 'Failed to save configuration.', 'Tuya');
     } finally {
       homebridge.hideSpinner();
+      if (isAuthenticated) {
+        $('tuyaNodevSave').disabled = false;
+      }
     }
   }
 

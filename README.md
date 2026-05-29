@@ -4,6 +4,9 @@
 
 # Tuya without developer account for Homebridge
 
+Current release: **1.0.6**
+
+
 A Homebridge platform plugin for Tuya and Smart Life devices that uses **Home Assistant-style Tuya QR Cloud Authentication**.
 
 This plugin is designed for users who want to add Tuya / Smart Life devices to HomeKit through Homebridge **without creating a Tuya IoT Developer Platform account** and without entering Tuya cloud project credentials.
@@ -305,3 +308,8 @@ Version 1.0.1 and later persist refreshed Tuya QR tokens back to the Homebridge 
 ```
 
 If this still happens after upgrading, open the plugin settings, clear the saved authentication, generate a new QR code, scan it with the Tuya Smart or Smart Life app, save the configuration, and restart Homebridge. Also confirm the Homebridge host clock is synchronized, because Tuya signed requests depend on the current time.
+
+### DP10 Smart Dimmer Plug / `bright_value_v2` dimmers
+
+Version **1.0.5** adds support for DP10-style Tuya dimmer plugs that expose `switch_led` and `bright_value_v2`. These are exposed in HomeKit as Lightbulb accessories with On and Brightness. If the accessory was previously shown as **Not Supported**, remove only that cached accessory in Homebridge UI and restart Homebridge after upgrading.
+

@@ -9,7 +9,7 @@ const Name_1 = require("./characteristic/Name");
 const On_1 = require("./characteristic/On");
 const SCHEMA_CODE = {
     ON: ['switch', 'switch_led', 'switch_1', 'switch_led_1'],
-    BRIGHTNESS: ['bright_value', 'bright_value_1'],
+    BRIGHTNESS: ['bright_value', 'bright_value_v2', 'bright_value_1', 'bright_value_2', 'brightness'],
 };
 class DimmerAccessory extends BaseAccessory_1.default {
     requiredSchema() {
@@ -28,10 +28,31 @@ class DimmerAccessory extends BaseAccessory_1.default {
             const service = this.accessory.getService(_schema.code)
                 || this.accessory.addService(this.Service.Lightbulb, name, _schema.code);
             (0, Name_1.configureName)(this, service, name);
-            (0, On_1.configureOn)(this, service, this.getSchema('switch' + suffix, 'switch_led' + suffix));
+            const onSchema = this.resolveOnSchemaForBrightness(suffix);
+            if (!onSchema) {
+                this.log.warn(`No on/off schema found for brightness DP ${_schema.code}. Tried switch/switch_led variants.`);
+            }
+            (0, On_1.configureOn)(this, service, onSchema);
             this.configureBrightness(service, suffix);
         }
     }
+
+    resolveOnSchemaForBrightness(suffix) {
+        const candidates = [];
+        if (suffix) {
+            candidates.push('switch' + suffix, 'switch_led' + suffix);
+        }
+        // bright_value_v2 is a schema generation/version marker, not a separate channel suffix.
+        // Devices such as the Treatlife/DP10 Smart dimmer Plug expose:
+        //   switch_led + bright_value_v2
+        // The older logic looked for switch_v2/switch_led_v2 and marked the device unsupported.
+        if (suffix === '_v2') {
+            candidates.push('switch_led', 'switch');
+        }
+        candidates.push('switch', 'switch_led', 'switch_1', 'switch_led_1');
+        return this.getSchema(...candidates);
+    }
+
     configureBrightness(service, suffix) {
         const schema = this.getSchema('bright_value' + suffix);
         if (!schema) {
