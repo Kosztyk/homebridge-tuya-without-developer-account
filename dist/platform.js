@@ -122,6 +122,34 @@ class TuyaPlatform {
           delete item.airConditioner;
         }
       }
+      if (item.petFeeder && typeof item.petFeeder === 'object') {
+        const normalizedPetFeeder = {};
+        const manualFeedAmount = Number(item.petFeeder.manualFeedAmount);
+        if (Number.isFinite(manualFeedAmount)) {
+          normalizedPetFeeder.manualFeedAmount = Math.max(1, Math.min(12, Math.round(manualFeedAmount)));
+        }
+        if (typeof item.petFeeder.exposeSlowFeed === 'boolean') {
+          normalizedPetFeeder.exposeSlowFeed = item.petFeeder.exposeSlowFeed;
+        }
+        if (Object.keys(normalizedPetFeeder).length > 0) {
+          item.petFeeder = normalizedPetFeeder;
+        } else {
+          delete item.petFeeder;
+        }
+      }
+      if (item.alarm && typeof item.alarm === 'object') {
+        const normalizedAlarm = {};
+        for (const key of ['exposeAlarmSoundSwitch', 'exposeMufflingSwitch', 'exposeNotificationSwitches']) {
+          if (typeof item.alarm[key] === 'boolean') {
+            normalizedAlarm[key] = item.alarm[key];
+          }
+        }
+        if (Object.keys(normalizedAlarm).length > 0) {
+          item.alarm = normalizedAlarm;
+        } else {
+          delete item.alarm;
+        }
+      }
       seenIds.add(id);
       validOverrides.push(item);
     }
@@ -249,6 +277,8 @@ class TuyaPlatform {
         unbridged: deviceConfig?.unbridged ?? false,
         schemaOverrides: deviceConfig?.schema ? JSON.stringify(deviceConfig.schema) : undefined,
         airConditioner: deviceConfig?.airConditioner ? JSON.stringify(deviceConfig.airConditioner) : undefined,
+        petFeeder: deviceConfig?.petFeeder ? JSON.stringify(deviceConfig.petFeeder) : undefined,
+        alarm: deviceConfig?.alarm ? JSON.stringify(deviceConfig.alarm) : undefined,
         adaptiveLighting: deviceConfig?.adaptiveLighting ?? false,
       };
       const { changed: configChanged } = this.configHash.hasConfigChanged(device.id, configToHash);

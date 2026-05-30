@@ -313,3 +313,10 @@ If this still happens after upgrading, open the plugin settings, clear the saved
 
 Version **1.0.5** adds support for DP10-style Tuya dimmer plugs that expose `switch_led` and `bright_value_v2`. These are exposed in HomeKit as Lightbulb accessories with On and Brightness. If the accessory was previously shown as **Not Supported**, remove only that cached accessory in Homebridge UI and restart Homebridge after upgrading.
 
+
+
+## Version 1.0.7 device support
+
+This release adds native support for Tuya Smart Pet Feeders and Tuya alarm panels that expose `master_mode`. Pet feeders expose quick/manual feed controls, optional slow-feed control, feed-state sensor, and battery when available. Alarm panels are exposed as HomeKit Security System accessories, with optional extra switches controlled through `deviceOverrides[].alarm`.
+
+Aroma diffuser devices whose Tuya QR cloud schema is empty remain visible as unsupported direct devices, but any diffuser scenes returned by Tuya are still exposed separately.

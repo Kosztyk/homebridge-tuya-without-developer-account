@@ -214,3 +214,18 @@ Supported from **v1.0.5**. These devices normally report category `tgq` and expo
 
 They are exposed to HomeKit as a Lightbulb with On and Brightness. After upgrading from an older version where the device showed as unsupported, remove the affected cached accessory from Homebridge UI and restart Homebridge.
 
+
+
+## Added in 1.0.7
+
+### Smart Pet Feeder
+
+Supported when Tuya exposes one or more of: `quick_feed`, `manual_feed`, `slow_feed`, `feed_state`, `battery_percentage`, `charge_state`.
+
+### Alarm / Security System
+
+Supported when Tuya exposes `master_mode`. Alarm-triggered state is detected from `master_state=alarm`, `sos_state=true`, or `master_mode=sos` when available. Optional extra switches can be enabled through `deviceOverrides[].alarm`.
+
+### Aroma Diffuser with Empty Schema
+
+If Tuya QR cloud returns an empty schema for the diffuser device, direct device control cannot be mapped. The plugin keeps diffuser Tuya scenes exposed and logs a clearer explanation.

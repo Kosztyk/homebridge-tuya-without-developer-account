@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.7
+
+- Added Smart Pet Feeder support for `quick_feed`, `manual_feed`, `slow_feed`, `feed_state`, battery, and charging state.
+- Added optional `deviceOverrides[].petFeeder.manualFeedAmount` and `deviceOverrides[].petFeeder.exposeSlowFeed`.
+- Added Tuya alarm panel support as a HomeKit Security System using `master_mode`, `master_state`, and optional tamper/battery DPs.
+- Added optional `deviceOverrides[].alarm` fields for alarm sound, muffling, and notification switches.
+- Added clearer logging when Tuya returns an empty schema for aroma diffusers. Diffuser scenes remain exposed separately.
+
 ## 1.0.6
 
 - Fixed a Homebridge UI issue where clicking **Save Configuration** could leave the custom settings page spinner running indefinitely even when QR authentication data had already been saved.

@@ -110,6 +110,49 @@
                       "default": 1
                     }
                   }
+                },
+                "petFeeder": {
+                  "type": "object",
+                  "title": "Smart Pet Feeder Options",
+                  "description": "Optional settings for Tuya pet feeders. The plugin exposes quick/manual feed switches, feed-state sensor, and battery when supported.",
+                  "properties": {
+                    "manualFeedAmount": {
+                      "type": "integer",
+                      "title": "Manual feed amount",
+                      "description": "Portions sent when the Manual Feed switch is turned on.",
+                      "minimum": 1,
+                      "maximum": 12,
+                      "default": 1
+                    },
+                    "exposeSlowFeed": {
+                      "type": "boolean",
+                      "title": "Expose Slow Feed switch",
+                      "description": "Expose slow_feed as a HomeKit switch when the device supports it.",
+                      "default": true
+                    }
+                  }
+                },
+                "alarm": {
+                  "type": "object",
+                  "title": "Alarm Options",
+                  "description": "Optional extra switches for Tuya alarm panels. The main alarm is exposed as a HomeKit Security System when master_mode is available.",
+                  "properties": {
+                    "exposeAlarmSoundSwitch": {
+                      "type": "boolean",
+                      "title": "Expose Alarm Sound switch",
+                      "default": false
+                    },
+                    "exposeMufflingSwitch": {
+                      "type": "boolean",
+                      "title": "Expose Mute/Muffling switch",
+                      "default": false
+                    },
+                    "exposeNotificationSwitches": {
+                      "type": "boolean",
+                      "title": "Expose Call/SMS/App/Low Battery switches",
+                      "default": false
+                    }
+                  }
                 }
               },
               "required": [

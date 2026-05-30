@@ -23,6 +23,13 @@ class DiffuserAccessory extends BaseAccessory_1.default {
     requiredSchema() {
         return [SCHEMA_CODE.SPRAY_ON];
     }
+
+    checkRequirements() {
+        if (this.device && Array.isArray(this.device.schema) && this.device.schema.length === 0) {
+            this.log.warn('Tuya returned an empty schema for this diffuser. Direct diffuser control cannot be mapped until Tuya exposes switch_spray or equivalent DPs. Any Tuya scenes for this diffuser will still be exposed separately.');
+        }
+        return super.checkRequirements();
+    }
     configureServices() {
         // Main Switch
         (0, On_1.configureOn)(this, undefined, this.getSchema(...SCHEMA_CODE.ON));
