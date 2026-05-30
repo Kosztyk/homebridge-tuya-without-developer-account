@@ -250,6 +250,11 @@ HomeKit stores temperature characteristic metadata in Celsius. Do not enter Fahr
 
 ## Adaptive Lighting
 
+
+### v1.0.9 UI save-state fix
+
+Version 1.0.9 fixes the custom settings UI so changing the Adaptive Lighting checkbox immediately enables **Save Configuration**. If QR authentication is already saved, the UI performs a final auth check during save and no longer blocks normal configuration-only changes.
+
 Version 1.0.8 adds optional HomeKit Adaptive Lighting support. Enable it in the Homebridge plugin settings with **Enable Adaptive Lighting for eligible CCT/RGBCW lights**.
 
 Adaptive Lighting is applied only to Tuya light accessories that expose both:

@@ -191,6 +191,7 @@
   let currentConfig = null;
   let pollTimer = null;
   let isAuthenticated = false;
+  let isDirty = false;
   let detectedDevices = [];
 
   const $ = (id) => document.getElementById(id);
@@ -267,6 +268,11 @@
   function enableSaving() {
     $('tuyaNodevSave').disabled = false;
     if (homebridge.enableSaveButton) homebridge.enableSaveButton();
+  }
+
+  function markDirty() {
+    isDirty = true;
+    enableSaving();
   }
 
   function getDeviceName(id) {
@@ -417,9 +423,7 @@
       const name = getDeviceName(id) || id;
       setAcStatus(`AC override saved in plugin config for ${name}: ${minTemperature}–${maxTemperature} °C, step ${temperatureStep} °C. Click Save Configuration when ready.`, 'success');
       homebridge.toast.success('AC temperature override added to config.', 'Tuya');
-      if (isAuthenticated) {
-        enableSaving();
-      }
+      markDirty();
     } catch (e) {
       setAcStatus(e.message || 'Failed to add AC override.', 'danger');
     }
@@ -453,9 +457,7 @@
       setAcStatus('Selected AC override was removed from the plugin config. Click Save Configuration when ready.', 'success');
       homebridge.toast.success('AC temperature override removed from config.', 'Tuya');
     }
-    if (isAuthenticated) {
-      enableSaving();
-    }
+    markDirty();
   }
 
   async function checkAuth(showSuccessToast = false) {
@@ -600,18 +602,24 @@
   }
 
   async function saveConfig() {
-    if (!isAuthenticated) {
-      setStatus('Scan and approve the QR code before saving.', 'warning');
-      return;
-    }
-
     const userCode = getUserCode();
     if (!userCode) {
       setStatus('User Code is required before saving.', 'warning');
+      homebridge.toast.error('User Code is required before saving.', 'Tuya');
       return;
     }
 
     try {
+      if (!isAuthenticated) {
+        // Do a last auth check here. This prevents normal configuration-only changes
+        // such as Adaptive Lighting from being blocked when the token already exists
+        // but this UI session has not marked itself authenticated yet.
+        const auth = await homebridge.request('/auth/status', { userCode });
+        isAuthenticated = !!auth.authenticated;
+        if (!isAuthenticated) {
+          throw new Error('Scan and approve the QR code, or click Check Existing Auth, before saving.');
+        }
+      }
       homebridge.showSpinner();
       $('tuyaNodevSave').disabled = true;
 
@@ -649,11 +657,13 @@
 
       if (saveTimedOut && verified) {
         const message = 'Configuration appears to be saved, but Homebridge UI did not return a save confirmation. Close this settings window and restart Homebridge.';
+        isDirty = false;
         homebridge.toast.success(message, 'Tuya');
         setStatus(message, 'success');
         return;
       }
 
+      isDirty = false;
       homebridge.toast.success('Configuration saved. Restart Homebridge to load devices.', 'Tuya');
       setStatus('Configuration saved. Restart Homebridge to load devices.', 'success');
     } catch (e) {
@@ -661,7 +671,7 @@
       homebridge.toast.error(e.message || 'Failed to save configuration.', 'Tuya');
     } finally {
       homebridge.hideSpinner();
-      if (isAuthenticated) {
+      if (isAuthenticated || isDirty) {
         $('tuyaNodevSave').disabled = false;
       }
     }
@@ -699,10 +709,14 @@
       $('tuyaNodevCheck').addEventListener('click', () => checkAuth(true));
       $('tuyaNodevClear').addEventListener('click', clearAuth);
       $('tuyaNodevSave').addEventListener('click', saveConfig);
-      $('tuyaNodevName').addEventListener('input', syncConfigToUi);
+      $('tuyaNodevName').addEventListener('input', async () => {
+        await syncConfigToUi();
+        markDirty();
+      });
       $('tuyaNodevAdaptiveLighting').addEventListener('change', async () => {
         await syncConfigToUi();
-        if (isAuthenticated) enableSaving();
+        markDirty();
+        setStatus('Adaptive Lighting setting changed. Click Save Configuration when ready.', 'info');
       });
       $('tuyaNodevUserCode').addEventListener('input', () => {
         isAuthenticated = false;

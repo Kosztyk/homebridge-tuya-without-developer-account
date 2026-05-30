@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.9
+
+- Fixed the custom Homebridge settings UI so toggling Adaptive Lighting marks the config as changed and enables **Save Configuration**.
+- Save now performs a final existing-auth check before blocking, so normal configuration-only changes are not prevented when a QR auth token is already saved.
+- Name and AC override UI changes also mark the custom config as dirty more reliably.
+
 ## 1.0.8
 
 - Added optional HomeKit Adaptive Lighting support for eligible Tuya lights.
