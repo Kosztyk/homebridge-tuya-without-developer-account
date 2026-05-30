@@ -251,6 +251,10 @@ HomeKit stores temperature characteristic metadata in Celsius. Do not enter Fahr
 ## Adaptive Lighting
 
 
+### v1.0.11 User Code preservation fix
+
+Version 1.0.11 fixes a custom settings UI regression where saving Adaptive Lighting or other configuration-only changes could preserve the auth file but remove `options.userCode` from `config.json`. The UI now preserves the existing User Code and can recover it automatically from saved `tuya-ha-qr-auth.<USER_CODE>.json` files.
+
 ### v1.0.9 UI save-state fix
 
 Version 1.0.9 fixes the custom settings UI so changing the Adaptive Lighting checkbox immediately enables **Save Configuration**. If QR authentication is already saved, the UI performs a final auth check during save and no longer blocks normal configuration-only changes.

@@ -179,6 +179,7 @@ function collectDevicesFromObject(root) {
       this.onRequest('/qr/status', this.qrStatus.bind(this));
       this.onRequest('/auth/status', this.authStatus.bind(this));
       this.onRequest('/auth/clear', this.clearAuth.bind(this));
+      this.onRequest('/auth/discover', this.discoverAuth.bind(this));
       this.onRequest('/devices/list', this.listDevices.bind(this));
       this.ready();
     }
@@ -268,6 +269,62 @@ function collectDevicesFromObject(root) {
         files: candidates.map((item) => item.file),
         errors,
         message: devices.length ? `Loaded ${devices.length} Tuya device(s) from Homebridge persist cache.` : 'No devices found in TuyaDeviceList cache yet. Authenticate and restart Homebridge once, then reopen this settings page.',
+      };
+    }
+
+
+
+    async discoverAuth() {
+      let entries;
+      try {
+        entries = await fs.promises.readdir(this.homebridgeStoragePath, { withFileTypes: true });
+      } catch (err) {
+        if (err && err.code === 'ENOENT') {
+          return { found: false, auths: [] };
+        }
+        throw err;
+      }
+
+      const auths = [];
+      for (const entry of entries) {
+        if (!entry.isFile()) {
+          continue;
+        }
+        const match = entry.name.match(/^tuya-ha-qr-auth\.(.+)\.json$/i);
+        if (!match) {
+          continue;
+        }
+        const userCode = normaliseUserCode(match[1]);
+        if (!userCode) {
+          continue;
+        }
+        const file = path.join(this.homebridgeStoragePath, entry.name);
+        try {
+          const stat = await fs.promises.stat(file);
+          const data = await this.readAuthFile(userCode);
+          if (!data) {
+            continue;
+          }
+          auths.push({
+            userCode,
+            file,
+            username: data.username || null,
+            uid: data.tokenInfo?.uid || null,
+            endpoint: data.endpoint || null,
+            savedAt: data.savedAt || null,
+            mtimeMs: stat.mtimeMs,
+          });
+        } catch {
+          // Ignore unreadable or incomplete auth files.
+        }
+      }
+
+      auths.sort((a, b) => (b.savedAt || b.mtimeMs || 0) - (a.savedAt || a.mtimeMs || 0));
+      const latest = auths[0] || null;
+      return {
+        found: !!latest,
+        ...(latest || {}),
+        auths,
       };
     }
 

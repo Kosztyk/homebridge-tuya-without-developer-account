@@ -193,6 +193,7 @@
   let isAuthenticated = false;
   let isDirty = false;
   let detectedDevices = [];
+  let discoveredUserCode = '';
 
   const $ = (id) => document.getElementById(id);
 
@@ -208,8 +209,39 @@
     el.textContent = message;
   }
 
+  function firstNonEmpty(...values) {
+    for (const value of values) {
+      if (value === undefined || value === null) {
+        continue;
+      }
+      const text = String(value).trim();
+      if (text) {
+        return text;
+      }
+    }
+    return '';
+  }
+
   function getUserCode() {
-    return $('tuyaNodevUserCode').value.trim();
+    return firstNonEmpty(
+      $('tuyaNodevUserCode')?.value,
+      currentConfig?.options?.userCode,
+      discoveredUserCode
+    );
+  }
+
+  function setUserCode(userCode) {
+    const value = String(userCode || '').trim();
+    if (!value) {
+      return;
+    }
+    discoveredUserCode = value;
+    if ($('tuyaNodevUserCode')) {
+      $('tuyaNodevUserCode').value = value;
+    }
+    currentConfig = currentConfig && typeof currentConfig === 'object' ? currentConfig : {};
+    currentConfig.options = currentConfig.options && typeof currentConfig.options === 'object' ? currentConfig.options : {};
+    currentConfig.options.userCode = value;
   }
 
   function getPlatformName() {
@@ -225,7 +257,10 @@
     cfg.platform = PLATFORM;
     cfg.name = getPlatformName();
     cfg.options = cfg.options && typeof cfg.options === 'object' ? cfg.options : {};
-    cfg.options.userCode = getUserCode();
+    const effectiveUserCode = getUserCode();
+    if (effectiveUserCode) {
+      cfg.options.userCode = effectiveUserCode;
+    }
     cfg.options.projectType = '3';
     cfg.options.enableAdaptiveLighting = $('tuyaNodevAdaptiveLighting')?.checked === true;
     if (!Array.isArray(cfg.options.deviceOverrides)) {
@@ -591,6 +626,34 @@
     }
   }
 
+
+
+  async function discoverExistingAuth(showMessage = false) {
+    try {
+      const res = await homebridge.request('/auth/discover', {});
+      if (res && res.found && res.userCode) {
+        const hadUserCode = !!getUserCode();
+        setUserCode(res.userCode);
+        if (!hadUserCode) {
+          isAuthenticated = true;
+          isDirty = true;
+          enableSaving();
+          const who = res.username || res.uid || res.endpoint || res.userCode;
+          setStatus(`Existing Tuya QR auth was found for ${who}. Click Save Configuration to restore the User Code in config.json.`, 'warning');
+        } else if (showMessage) {
+          const who = res.username || res.uid || res.endpoint || res.userCode;
+          setStatus(`Existing Tuya QR auth found for ${who}.`, 'success');
+        }
+        return res;
+      }
+    } catch (e) {
+      if (showMessage) {
+        setStatus(e.message || 'Could not discover existing Tuya QR authentication.', 'warning');
+      }
+    }
+    return null;
+  }
+
   async function verifySavedConfig(userCode) {
     const blocks = await withTimeout(
       homebridge.getPluginConfig(),
@@ -602,12 +665,16 @@
   }
 
   async function saveConfig() {
+    if (!getUserCode()) {
+      await discoverExistingAuth(false);
+    }
     const userCode = getUserCode();
     if (!userCode) {
       setStatus('User Code is required before saving.', 'warning');
       homebridge.toast.error('User Code is required before saving.', 'Tuya');
       return;
     }
+    setUserCode(userCode);
 
     try {
       if (!isAuthenticated) {
@@ -686,10 +753,14 @@
         mode: 'cloud',
         options: { projectType: '3', deviceOverrides: [] },
       };
-      ensureConfig();
+      currentConfig.options = currentConfig.options && typeof currentConfig.options === 'object' ? currentConfig.options : {};
+
+      // Important: restore saved values into the UI before normalising/staging config.
+      // Otherwise the default unchecked checkbox can overwrite a saved true value.
       $('tuyaNodevName').value = currentConfig.name || 'Tuya without developer account';
-      $('tuyaNodevUserCode').value = currentConfig.options?.userCode || '';
+      if (currentConfig.options?.userCode) setUserCode(currentConfig.options.userCode);
       $('tuyaNodevAdaptiveLighting').checked = currentConfig.options?.enableAdaptiveLighting === true;
+      ensureConfig();
 
       if (homebridge.showSchemaForm) homebridge.showSchemaForm();
       window.homebridge.addEventListener('configChanged', (event) => {
@@ -697,10 +768,14 @@
         const block = Array.isArray(data) ? data[0] : data;
         if (block && typeof block === 'object') {
           currentConfig = block;
-          ensureConfig();
+          currentConfig.options = currentConfig.options && typeof currentConfig.options === 'object' ? currentConfig.options : {};
+
+          // Same ordering as initial load: update form controls first, then normalise.
           if (block.name) $('tuyaNodevName').value = block.name;
-          if (block.options?.userCode) $('tuyaNodevUserCode').value = block.options.userCode;
+          if (block.options?.userCode) setUserCode(block.options.userCode);
+          else if (getUserCode()) setUserCode(getUserCode());
           $('tuyaNodevAdaptiveLighting').checked = block.options?.enableAdaptiveLighting === true;
+          ensureConfig();
           renderAcOverrides();
         }
       });
@@ -726,6 +801,10 @@
       $('tuyaNodevLoadDevices').addEventListener('click', () => loadDetectedDevices(true));
       $('tuyaNodevApplyAc').addEventListener('click', addOrUpdateAcOverride);
       $('tuyaNodevRemoveAc').addEventListener('click', removeSelectedAcOverride);
+
+      if (!getUserCode()) {
+        await discoverExistingAuth(false);
+      }
 
       await syncConfigToUi();
       await loadDetectedDevices(false);

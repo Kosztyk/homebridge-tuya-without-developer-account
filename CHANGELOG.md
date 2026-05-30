@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.11
+
+- Fixed custom Homebridge UI initialization so the Adaptive Lighting checkbox stays checked after saving and reopening plugin settings.
+- Fixed config reload handling so saved `options.enableAdaptiveLighting` is copied into the checkbox before the UI normalizes/stages plugin config.
+- Preserved the `options.userCode` fix from v1.0.10 while preventing checkbox defaults from overwriting saved values.
+
+## 1.0.10
+
+- Fixed the custom Homebridge settings UI so saving Adaptive Lighting or other configuration-only changes preserves `options.userCode`.
+- Added automatic discovery of existing `tuya-ha-qr-auth.<USER_CODE>.json` files from Homebridge storage. If the config is missing `userCode` but an auth file exists, the UI restores the User Code field and asks the user to save.
+- Prevented empty User Code values from overwriting an existing QR-auth configuration during `updatePluginConfig()`.
+
 ## 1.0.9
 
 - Fixed the custom Homebridge settings UI so toggling Adaptive Lighting marks the config as changed and enables **Save Configuration**.
