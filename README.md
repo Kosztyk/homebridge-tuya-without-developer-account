@@ -351,6 +351,6 @@ Version **1.0.5** adds support for DP10-style Tuya dimmer plugs that expose `swi
 
 ## Version 1.0.7 device support
 
-This release adds native support for Tuya Smart Pet Feeders and Tuya alarm panels that expose `master_mode`. Pet feeders expose quick/manual feed controls, optional slow-feed control, feed-state sensor, and battery when available. Alarm panels are exposed as HomeKit Security System accessories, with optional extra switches controlled through `deviceOverrides[].alarm`.
+This release adds native support for Tuya Smart Pet Feeders and Tuya alarm panels that expose `master_mode`. Pet feeders expose a refined HomeKit Valve-style **Feed Now** control, Quick Feed switch, optional Slow Feed switch, feed-state sensor, and battery when available. Alarm panels are exposed as HomeKit Security System accessories, with optional extra switches controlled through `deviceOverrides[].alarm`.
 
 Aroma diffuser devices whose Tuya QR cloud schema is empty remain visible as unsupported direct devices, but any diffuser scenes returned by Tuya are still exposed separately.

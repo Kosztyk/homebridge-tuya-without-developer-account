@@ -222,6 +222,8 @@ They are exposed to HomeKit as a Lightbulb with On and Brightness. After upgradi
 
 Supported when Tuya exposes one or more of: `quick_feed`, `manual_feed`, `slow_feed`, `feed_state`, `battery_percentage`, `charge_state`.
 
+From v1.0.13 the feeder uses a refined HomeKit `Valve` service as the main **Feed Now** control. Activating it sends the configured `manual_feed` amount when available, or falls back to `quick_feed`. `InUse` reflects `feed_state`. The plugin also keeps the Quick Feed switch, optional Slow Feed switch, Feeding occupancy/status sensor, and Battery service.
+
 ### Alarm / Security System
 
 Supported when Tuya exposes `master_mode`. Alarm-triggered state is detected from `master_state=alarm`, `sos_state=true`, or `master_mode=sos` when available. Optional extra switches can be enabled through `deviceOverrides[].alarm`.

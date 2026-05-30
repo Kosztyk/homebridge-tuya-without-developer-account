@@ -135,12 +135,12 @@
                 "petFeeder": {
                   "type": "object",
                   "title": "Smart Pet Feeder Options",
-                  "description": "Optional settings for Tuya pet feeders. The plugin exposes quick/manual feed switches, feed-state sensor, and battery when supported.",
+                  "description": "Optional settings for Tuya pet feeders. The plugin exposes a refined HomeKit Valve-style Feed Now control, Quick Feed switch, optional Slow Feed switch, feeding-state sensor, and battery when supported.",
                   "properties": {
                     "manualFeedAmount": {
                       "type": "integer",
                       "title": "Manual feed amount",
-                      "description": "Portions sent when the Manual Feed switch is turned on.",
+                      "description": "Portions sent when the Valve-style Feed Now control is activated.",
                       "minimum": 1,
                       "maximum": 12,
                       "default": 1

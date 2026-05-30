@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.13
+
+- Changed Smart Pet Feeder presentation to use a refined HomeKit `Valve` service as the main **Feed Now** control.
+- `Active` triggers the configured `manual_feed` amount when available, falling back to `quick_feed` when needed.
+- `InUse` reflects `feed_state` so HomeKit can show when the feeder is currently feeding.
+- Kept the dedicated Quick Feed switch, optional Slow Feed switch, Battery service, and Feeding occupancy/status sensor.
+- Removes the old cached Manual Feed switch from feeder accessories when reconfigured, since the Valve now handles manual feeding.
+
 ## 1.0.12
 
 - Stopped exposing `switch_inching` as a HomeKit switch because it is an internal Tuya inching/timer configuration DP, not a user-facing relay.
