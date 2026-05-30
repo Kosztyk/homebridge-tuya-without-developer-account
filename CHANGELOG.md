@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.12
+
+- Stopped exposing `switch_inching` as a HomeKit switch because it is an internal Tuya inching/timer configuration DP, not a user-facing relay.
+- Automatically removes cached `switch_inching` Switch/Outlet services from multi-gang switch accessories when the accessory is reconfigured.
+- Filters hidden/internal switch configuration DPs from switch auto-discovery so they cannot create invalid HomeKit names.
+- Prevents future HAP-NodeJS invalid-name warnings caused by the raw `switch_inching` service after the affected accessory cache is refreshed.
+
 ## 1.0.11
 
 - Fixed custom Homebridge UI initialization so the Adaptive Lighting checkbox stays checked after saving and reopening plugin settings.

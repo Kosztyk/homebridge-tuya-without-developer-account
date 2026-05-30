@@ -20,6 +20,9 @@ const SCHEMA_CODE = {
     CURRENT_HUMIDITY: ['va_humidity', 'humidity_value'],
     INCHING: ['switch_inching'],
 };
+const INTERNAL_SWITCH_SCHEMA_CODES = new Set([
+    'switch_inching',
+]);
 class SwitchAccessory extends BaseAccessory_1.default {
     requiredSchema() {
         return [SCHEMA_CODE.ON];
@@ -30,7 +33,9 @@ class SwitchAccessory extends BaseAccessory_1.default {
             this.platform.log.warn('Remove old service:', oldService.UUID);
             this.accessory.removeService(oldService);
         }
-        const schemata = this.device.schema.filter((schema) => schema.code.startsWith('switch') && schema.type === TuyaDevice_1.TuyaDeviceSchemaType.Boolean);
+        const schemata = this.device.schema.filter((schema) => schema.code.startsWith('switch')
+            && schema.type === TuyaDevice_1.TuyaDeviceSchemaType.Boolean
+            && !INTERNAL_SWITCH_SCHEMA_CODES.has(schema.code));
         this.log.info(`[SwitchAccessory] Found ${schemata.length} switch schemas: ${schemata.map(s => s.code).join(', ')}`);
         // Track which switch services should exist
         const validSubtypes = new Set(schemata.map(s => s.code));
@@ -38,20 +43,27 @@ class SwitchAccessory extends BaseAccessory_1.default {
         // Match both Switch and Outlet UUIDs since OutletAccessory uses Service.Outlet.
         const switchOrOutletUUIDs = new Set([this.Service.Switch.UUID, this.Service.Outlet.UUID]);
         const allSwitchServices = this.accessory.services.filter(s => switchOrOutletUUIDs.has(s.UUID) && s.subtype);
+        for (const oldService of [...allSwitchServices]) {
+            if (oldService.subtype && INTERNAL_SWITCH_SCHEMA_CODES.has(oldService.subtype)) {
+                this.log.warn(`Removing internal Tuya switch config service from cache: ${oldService.displayName} (subtype: ${oldService.subtype})`);
+                this.accessory.removeService(oldService);
+            }
+        }
+        const activeSwitchServices = this.accessory.services.filter(s => switchOrOutletUUIDs.has(s.UUID) && s.subtype);
         // Check early if we'll be keeping services due to auto-detect or config unchanged
         const configChanged = this.device?.configChanged ?? true;
         const isAutoDetecting = this.device?.isAutoDetecting ?? false;
         const shouldRemoveExtras = configChanged && !isAutoDetecting;
-        if (allSwitchServices.length > schemata.length) {
+        if (activeSwitchServices.length > schemata.length) {
             if (shouldRemoveExtras) {
-                this.log.warn(`[SwitchAccessory] Found ${allSwitchServices.length} cached switch services but only ${schemata.length} in schema. Removing extras...`);
+                this.log.warn(`[SwitchAccessory] Found ${activeSwitchServices.length} cached switch services but only ${schemata.length} in schema. Removing extras...`);
             }
             else {
-                this.log.info(`[SwitchAccessory] Found ${allSwitchServices.length} cached switch services but only ${schemata.length} in schema. ${isAutoDetecting ? 'Auto-detect in progress' : 'Config unchanged'} – keeping for now...`);
+                this.log.info(`[SwitchAccessory] Found ${activeSwitchServices.length} cached switch services but only ${schemata.length} in schema. ${isAutoDetecting ? 'Auto-detect in progress' : 'Config unchanged'} – keeping for now...`);
             }
         }
         const keptCachedServices = new Map();
-        for (const oldService of allSwitchServices) {
+        for (const oldService of activeSwitchServices) {
             if (!validSubtypes.has(oldService.subtype)) {
                 if (shouldRemoveExtras) {
                     // Config changed and not in auto-detect, so enforce the new schema
@@ -95,7 +107,7 @@ class SwitchAccessory extends BaseAccessory_1.default {
         // Other
         (0, CurrentTemperature_1.configureCurrentTemperature)(this, undefined, this.getSchema(...SCHEMA_CODE.CURRENT_TEMP));
         (0, CurrentRelativeHumidity_1.configureCurrentRelativeHumidity)(this, undefined, this.getSchema(...SCHEMA_CODE.CURRENT_HUMIDITY));
-        this.configureInching();
+        this.removeInternalSwitchServices();
     }
     async onDeviceInfoUpdate(info) {
         // Re-run service configuration so newly auto-detected switches get their handlers registered.
@@ -115,33 +127,16 @@ class SwitchAccessory extends BaseAccessory_1.default {
             (0, EnergyUsage_1.configureEnergyUsage)(this.platform.api, this, service, this.getSchema(...SCHEMA_CODE.CURRENT), this.getSchema(...SCHEMA_CODE.POWER), this.getSchema(...SCHEMA_CODE.VOLTAGE), this.getSchema(...SCHEMA_CODE.TOTAL_POWER));
         }
     }
-    configureInching() {
-        const schema = this.getSchema(...SCHEMA_CODE.INCHING);
-        if (!schema || schema.type !== TuyaDevice_1.TuyaDeviceSchemaType.String) {
-            return;
-        }
-        const service = this.accessory.getService(schema.code)
-            || this.accessory.addService(this.Service.Switch, schema.code, schema.code);
-        (0, Name_1.configureName)(this, service, schema.code);
-        service.getCharacteristic(this.Characteristic.On)
-            .onGet(() => {
-            this.checkOnlineStatus();
-            const status = this.getStatus(schema.code);
-            const buffer = Buffer.from(status.value, 'base64');
-            return (buffer.length === 3) && (buffer[0] === 1);
-        })
-            .onSet(async (value) => {
-            const status = this.getStatus(schema.code);
-            let buffer = Buffer.from(status.value, 'base64');
-            if (buffer.length !== 3) {
-                buffer = Buffer.alloc(3);
+    removeInternalSwitchServices() {
+        const switchOrOutletUUIDs = new Set([this.Service.Switch.UUID, this.Service.Outlet.UUID]);
+        for (const service of [...this.accessory.services]) {
+            if (switchOrOutletUUIDs.has(service.UUID)
+                && service.subtype
+                && INTERNAL_SWITCH_SCHEMA_CODES.has(service.subtype)) {
+                this.log.warn(`Removing internal Tuya switch config service from cache: ${service.displayName} (subtype: ${service.subtype})`);
+                this.accessory.removeService(service);
             }
-            buffer[0] = value ? 1 : 0;
-            await this.sendCommands([{
-                    code: schema.code,
-                    value: buffer.toString('base64'),
-                }], true);
-        });
+        }
     }
 }
 exports.default = SwitchAccessory;
