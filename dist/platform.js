@@ -47,6 +47,7 @@ class TuyaPlatform {
     // Old Tuya IoT OpenAPI credentials, local LAN mode, username/password login, and hybrid mode are not accepted.
     this.config.mode = "cloud";
     this.options.projectType = "3";
+    this.options.enableAdaptiveLighting = this.options.enableAdaptiveLighting === true;
 
     if (!this.options.userCode || String(this.options.userCode).trim().length === 0) {
       this.log.error("[Tuya QR] Missing Tuya User Code. Open Homebridge UI → Plugins → Tuya without developer account for Homebridge → Settings, generate/scan the QR code, then save.");
@@ -148,6 +149,16 @@ class TuyaPlatform {
           item.alarm = normalizedAlarm;
         } else {
           delete item.alarm;
+        }
+      }
+      if (item.adaptiveLighting !== undefined) {
+        if (typeof item.adaptiveLighting === 'boolean') {
+          item.adaptiveLighting = { enabled: item.adaptiveLighting };
+        } else if (item.adaptiveLighting && typeof item.adaptiveLighting === 'object' && typeof item.adaptiveLighting.enabled === 'boolean') {
+          item.adaptiveLighting = { enabled: item.adaptiveLighting.enabled };
+        } else {
+          this.log.warn('[Tuya QR] Ignoring invalid adaptiveLighting override for id "%s". Use true/false or { enabled: true/false }.', id);
+          delete item.adaptiveLighting;
         }
       }
       seenIds.add(id);
@@ -279,7 +290,8 @@ class TuyaPlatform {
         airConditioner: deviceConfig?.airConditioner ? JSON.stringify(deviceConfig.airConditioner) : undefined,
         petFeeder: deviceConfig?.petFeeder ? JSON.stringify(deviceConfig.petFeeder) : undefined,
         alarm: deviceConfig?.alarm ? JSON.stringify(deviceConfig.alarm) : undefined,
-        adaptiveLighting: deviceConfig?.adaptiveLighting ?? false,
+        globalAdaptiveLighting: !!this.options.enableAdaptiveLighting,
+        adaptiveLighting: deviceConfig?.adaptiveLighting ? JSON.stringify(deviceConfig.adaptiveLighting) : undefined,
       };
       const { changed: configChanged } = this.configHash.hasConfigChanged(device.id, configToHash);
       device.configChanged = configChanged;

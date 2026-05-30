@@ -114,6 +114,19 @@
   </div>
 </div>
 
+
+<div class="tuya-nodev-card">
+  <div class="tuya-nodev-title">Adaptive Lighting</div>
+  <p class="tuya-nodev-small mb-3">
+    Enable HomeKit Adaptive Lighting only for eligible Tuya lights that expose both brightness and real white color-temperature controls. RGB-only lights, dimmer plugs, switches, and outlets are skipped automatically.
+  </p>
+  <div class="form-check">
+    <input id="tuyaNodevAdaptiveLighting" class="form-check-input" type="checkbox">
+    <label class="form-check-label" for="tuyaNodevAdaptiveLighting">Enable Adaptive Lighting for eligible CCT/RGBCW lights</label>
+  </div>
+  <small class="form-text text-muted">HomeKit automatic mode may send color-temperature updates roughly once per minute while Adaptive Lighting is active.</small>
+</div>
+
 <div class="tuya-nodev-card">
   <div class="tuya-nodev-title">Air Conditioner Temperature Overrides</div>
   <p class="tuya-nodev-small mb-3">
@@ -213,6 +226,7 @@
     cfg.options = cfg.options && typeof cfg.options === 'object' ? cfg.options : {};
     cfg.options.userCode = getUserCode();
     cfg.options.projectType = '3';
+    cfg.options.enableAdaptiveLighting = $('tuyaNodevAdaptiveLighting')?.checked === true;
     if (!Array.isArray(cfg.options.deviceOverrides)) {
       cfg.options.deviceOverrides = [];
     }
@@ -665,6 +679,7 @@
       ensureConfig();
       $('tuyaNodevName').value = currentConfig.name || 'Tuya without developer account';
       $('tuyaNodevUserCode').value = currentConfig.options?.userCode || '';
+      $('tuyaNodevAdaptiveLighting').checked = currentConfig.options?.enableAdaptiveLighting === true;
 
       if (homebridge.showSchemaForm) homebridge.showSchemaForm();
       window.homebridge.addEventListener('configChanged', (event) => {
@@ -675,6 +690,7 @@
           ensureConfig();
           if (block.name) $('tuyaNodevName').value = block.name;
           if (block.options?.userCode) $('tuyaNodevUserCode').value = block.options.userCode;
+          $('tuyaNodevAdaptiveLighting').checked = block.options?.enableAdaptiveLighting === true;
           renderAcOverrides();
         }
       });
@@ -684,6 +700,10 @@
       $('tuyaNodevClear').addEventListener('click', clearAuth);
       $('tuyaNodevSave').addEventListener('click', saveConfig);
       $('tuyaNodevName').addEventListener('input', syncConfigToUi);
+      $('tuyaNodevAdaptiveLighting').addEventListener('change', async () => {
+        await syncConfigToUi();
+        if (isAuthenticated) enableSaving();
+      });
       $('tuyaNodevUserCode').addEventListener('input', () => {
         isAuthenticated = false;
         disableSaving();

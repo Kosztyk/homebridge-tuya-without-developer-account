@@ -247,6 +247,31 @@ Fahrenheit display examples:
 
 HomeKit stores temperature characteristic metadata in Celsius. Do not enter Fahrenheit values in the plugin config.
 
+
+## Adaptive Lighting
+
+Version 1.0.8 adds optional HomeKit Adaptive Lighting support. Enable it in the Homebridge plugin settings with **Enable Adaptive Lighting for eligible CCT/RGBCW lights**.
+
+Adaptive Lighting is applied only to Tuya light accessories that expose both:
+
+- Brightness
+- A real white color-temperature datapoint, such as `temp_value` or `temp_value_v2`
+
+The plugin automatically skips RGB-only lights, brightness-only dimmers such as DP10 dimmer plugs, outlets, switches, and devices without a real color-temperature datapoint. HomeKit automatic mode may send periodic color-temperature updates while Adaptive Lighting is active.
+
+Advanced per-device override example:
+
+```json
+{
+  "id": "YOUR_LIGHT_DEVICE_ID",
+  "adaptiveLighting": {
+    "enabled": true
+  }
+}
+```
+
+Set `enabled` to `false` to disable Adaptive Lighting for one device even when the global option is enabled.
+
 ## Troubleshooting
 
 ### Plugin starts from cache only and logs `Each device override must include an "id"`

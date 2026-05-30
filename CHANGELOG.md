@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.8
+
+- Added optional HomeKit Adaptive Lighting support for eligible Tuya lights.
+- Added global `options.enableAdaptiveLighting` setting in the Homebridge custom UI.
+- Added per-device `deviceOverrides[].adaptiveLighting.enabled` override support.
+- Adaptive Lighting is enabled only when a light exposes both Brightness and a real ColorTemperature DP. RGB-only lights, brightness-only dimmers, switches, and outlets are skipped automatically.
+- Added safer logging when Adaptive Lighting is disabled or skipped for unsupported lights.
+
 ## 1.0.7
 
 - Added Smart Pet Feeder support for `quick_feed`, `manual_feed`, `slow_feed`, `feed_state`, battery, and charging state.

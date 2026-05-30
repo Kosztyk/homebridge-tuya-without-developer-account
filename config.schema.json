@@ -36,6 +36,12 @@
               "type": "string"
             }
           },
+          "enableAdaptiveLighting": {
+            "type": "boolean",
+            "title": "Enable Adaptive Lighting for eligible lights",
+            "description": "Optional. Enables HomeKit Adaptive Lighting only for Tuya lights that expose both brightness and real white color-temperature controls. RGB-only lights and dimmer plugs are skipped.",
+            "default": false
+          },
           "deviceOverrides": {
             "type": "array",
             "title": "Device Overrides",
@@ -57,8 +63,23 @@
                   "default": false
                 },
                 "adaptiveLighting": {
-                  "type": "boolean",
-                  "title": "Enable Adaptive Lighting",
+                  "title": "Adaptive Lighting Override",
+                  "description": "Optional per-device override. Use enabled=true to force-enable for this device, or enabled=false to disable it even when global Adaptive Lighting is enabled.",
+                  "oneOf": [
+                    {
+                      "type": "boolean",
+                      "title": "Enabled"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "title": "Enabled"
+                        }
+                      }
+                    }
+                  ],
                   "default": false
                 },
                 "schema": {
@@ -194,6 +215,7 @@
       "expanded": false,
       "items": [
         "options.homeWhitelist",
+        "options.enableAdaptiveLighting",
         "options.deviceOverrides",
         "options.debug",
         "options.debugLevel"

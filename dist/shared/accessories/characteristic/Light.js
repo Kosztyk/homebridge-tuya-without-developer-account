@@ -249,20 +249,53 @@ function configureLight(accessory, service, onSchema, brightSchema, tempSchema, 
     }
     configureAdaptiveLighting(accessory, service, brightSchema, tempSchema);
 }
-function configureAdaptiveLighting(accessory, service, brightSchema, tempSchema) {
+function getAdaptiveLightingOverride(config) {
+    if (!config || config.adaptiveLighting === undefined) {
+        return undefined;
+    }
+    if (typeof config.adaptiveLighting === 'boolean') {
+        return config.adaptiveLighting;
+    }
+    if (config.adaptiveLighting && typeof config.adaptiveLighting === 'object' && typeof config.adaptiveLighting.enabled === 'boolean') {
+        return config.adaptiveLighting.enabled;
+    }
+    return undefined;
+}
+function shouldEnableAdaptiveLighting(accessory) {
     const config = accessory.platform.getDeviceConfig(accessory.device);
-    if (!config || config.adaptiveLighting !== true) {
+    const override = getAdaptiveLightingOverride(config);
+    if (override !== undefined) {
+        return override;
+    }
+    return accessory.platform.options.enableAdaptiveLighting === true;
+}
+function configureAdaptiveLighting(accessory, service, brightSchema, tempSchema) {
+    if (!shouldEnableAdaptiveLighting(accessory)) {
         accessory.log.info('Adaptive Lighting disabled.');
         return;
     }
-    accessory.log.info('Adaptive Lighting enabled.');
     if (!brightSchema || !tempSchema) {
-        accessory.log.warn('Adaptive Lighting not supported. Missing brightness or color temperature schema.');
+        accessory.log.info('Adaptive Lighting skipped: this light does not expose both brightness and a real color-temperature DP.');
+        return;
+    }
+    if (!service.testCharacteristic(accessory.Characteristic.Brightness) || !service.testCharacteristic(accessory.Characteristic.ColorTemperature)) {
+        accessory.log.info('Adaptive Lighting skipped: HomeKit Lightbulb service is missing Brightness or ColorTemperature.');
         return;
     }
     const { AdaptiveLightingController } = accessory.platform.api.hap;
-    const controller = new AdaptiveLightingController(service);
-    accessory.accessory.configureController(controller);
-    accessory.adaptiveLightingController = controller;
+    if (!AdaptiveLightingController) {
+        accessory.log.warn('Adaptive Lighting skipped: this Homebridge/HAP-NodeJS version does not expose AdaptiveLightingController.');
+        return;
+    }
+    try {
+        const controller = new AdaptiveLightingController(service);
+        accessory.accessory.configureController(controller);
+        accessory.adaptiveLightingController = controller;
+        accessory.log.info('Adaptive Lighting enabled for eligible CCT/RGBCW light.');
+    }
+    catch (error) {
+        accessory.log.warn(`Adaptive Lighting setup failed: ${error instanceof Error ? error.message : error}`);
+    }
 }
+
 //# sourceMappingURL=Light.js.map

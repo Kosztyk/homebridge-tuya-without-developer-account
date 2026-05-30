@@ -229,3 +229,9 @@ Supported when Tuya exposes `master_mode`. Alarm-triggered state is detected fro
 ### Aroma Diffuser with Empty Schema
 
 If Tuya QR cloud returns an empty schema for the diffuser device, direct device control cannot be mapped. The plugin keeps diffuser Tuya scenes exposed and logs a clearer explanation.
+
+## Adaptive Lighting support
+
+Adaptive Lighting is supported for eligible Tuya light accessories that expose both brightness and real white color-temperature datapoints, for example CCT, CW, or RGBCW lights.
+
+Not eligible: simple on/off lights, outlets, switches, brightness-only dimmers, DP10 dimmer plugs, and RGB-only lights without a real white-temperature datapoint.
