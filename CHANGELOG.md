@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.14
+
+- Preserves service names changed by users in Apple Home/Homebridge instead of resetting multi-gang switch and outlet names on every restart.
+- Added global `options.preserveHomeKitNames` setting, enabled by default.
+- Added per-device `deviceOverrides[].preserveHomeKitNames` override.
+- Added explicit `deviceOverrides[].switchNames` channel-name overrides keyed by Tuya schema code, such as `switch_1`, `switch_2`, and `switch_usb1`.
+- Added a Homebridge custom UI section for preserving HomeKit names and assigning explicit names to detected multi-switch/outlet channels.
+- Name priority is now: explicit `switchNames` override → existing HomeKit `ConfiguredName` → plugin-generated default.
+- Added `nameOverride` as a compatibility alias for `preserveHomeKitNames`.
+
 ## 1.0.13
 
 - Changed Smart Pet Feeder presentation to use a refined HomeKit `Valve` service as the main **Feed Now** control.

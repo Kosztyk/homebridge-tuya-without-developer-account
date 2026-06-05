@@ -42,6 +42,12 @@
             "description": "Optional. Enables HomeKit Adaptive Lighting only for Tuya lights that expose both brightness and real white color-temperature controls. RGB-only lights and dimmer plugs are skipped.",
             "default": false
           },
+          "preserveHomeKitNames": {
+            "type": "boolean",
+            "title": "Preserve names changed in HomeKit",
+            "description": "Recommended. Prevents Homebridge restarts from replacing names you assigned to individual services in Apple Home, especially multi-gang switches and outlets. Explicit switchNames overrides still take priority.",
+            "default": true
+          },
           "deviceOverrides": {
             "type": "array",
             "title": "Device Overrides",
@@ -61,6 +67,19 @@
                   "type": "boolean",
                   "title": "Expose as external accessory",
                   "default": false
+                },
+                "preserveHomeKitNames": {
+                  "type": "boolean",
+                  "title": "Preserve HomeKit names for this device",
+                  "description": "Optional per-device override of the global setting. True preserves names changed in Apple Home; false lets the plugin reapply generated/default names on restart."
+                },
+                "switchNames": {
+                  "type": "object",
+                  "title": "Multi-switch channel names",
+                  "description": "Optional explicit names keyed by Tuya schema code. These names take priority over preserved HomeKit names and generated defaults. Example: {\"switch_1\":\"Coffee Machine\",\"switch_2\":\"Kitchen Lamp\",\"switch_usb1\":\"USB Ports\"}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
                 },
                 "adaptiveLighting": {
                   "title": "Adaptive Lighting Override",
@@ -106,26 +125,26 @@
                 "airConditioner": {
                   "type": "object",
                   "title": "Air Conditioner Temperature Limits",
-                  "description": "Optional HomeKit temperature range override for Wi-Fi air conditioners. Values are always Celsius; Home app converts to Fahrenheit automatically for users using \u00b0F.",
+                  "description": "Optional HomeKit temperature range override for Wi-Fi air conditioners. Values are always Celsius; Home app converts to Fahrenheit automatically for users using °F.",
                   "properties": {
                     "minTemperature": {
                       "type": "number",
-                      "title": "Minimum temperature (\u00b0C)",
+                      "title": "Minimum temperature (°C)",
                       "description": "Lowest setpoint exposed to HomeKit. Common values are 16 or 17. Leave empty to use Tuya schema.",
                       "minimum": 0,
                       "maximum": 50
                     },
                     "maxTemperature": {
                       "type": "number",
-                      "title": "Maximum temperature (\u00b0C)",
+                      "title": "Maximum temperature (°C)",
                       "description": "Highest setpoint exposed to HomeKit. Common value is 31. Leave empty to use Tuya schema.",
                       "minimum": 0,
                       "maximum": 60
                     },
                     "temperatureStep": {
                       "type": "number",
-                      "title": "Temperature step (\u00b0C)",
-                      "description": "Set to 1 to suppress 0.5 \u00b0C steps. Values are Celsius even when Home app displays Fahrenheit.",
+                      "title": "Temperature step (°C)",
+                      "description": "Set to 1 to suppress 0.5 °C steps. Values are Celsius even when Home app displays Fahrenheit.",
                       "minimum": 0.1,
                       "maximum": 5,
                       "default": 1
@@ -216,6 +235,7 @@
       "items": [
         "options.homeWhitelist",
         "options.enableAdaptiveLighting",
+        "options.preserveHomeKitNames",
         "options.deviceOverrides",
         "options.debug",
         "options.debugLevel"

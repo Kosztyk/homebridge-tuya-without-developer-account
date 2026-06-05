@@ -237,3 +237,7 @@ If Tuya QR cloud returns an empty schema for the diffuser device, direct device 
 Adaptive Lighting is supported for eligible Tuya light accessories that expose both brightness and real white color-temperature datapoints, for example CCT, CW, or RGBCW lights.
 
 Not eligible: simple on/off lights, outlets, switches, brightness-only dimmers, DP10 dimmer plugs, and RGB-only lights without a real white-temperature datapoint.
+## Multi-gang switch and outlet names
+
+From v1.0.14, names changed in Apple Home/Homebridge are preserved by default for multi-service accessories. Optional `deviceOverrides[].switchNames` entries can assign explicit names to Tuya channels such as `switch_1`, `switch_2`, and `switch_usb1`.
+

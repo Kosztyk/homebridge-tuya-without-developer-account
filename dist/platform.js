@@ -48,6 +48,11 @@ class TuyaPlatform {
     this.config.mode = "cloud";
     this.options.projectType = "3";
     this.options.enableAdaptiveLighting = this.options.enableAdaptiveLighting === true;
+    // Preserve names changed by users in Apple Home/Homebridge by default.
+    // nameOverride is accepted as a compatibility alias used by some plugins.
+    this.options.preserveHomeKitNames = typeof this.options.preserveHomeKitNames === 'boolean'
+      ? this.options.preserveHomeKitNames
+      : (typeof this.options.nameOverride === 'boolean' ? this.options.nameOverride : true);
 
     if (!this.options.userCode || String(this.options.userCode).trim().length === 0) {
       this.log.error("[Tuya QR] Missing Tuya User Code. Open Homebridge UI → Plugins → Tuya without developer account for Homebridge → Settings, generate/scan the QR code, then save.");
@@ -149,6 +154,41 @@ class TuyaPlatform {
           item.alarm = normalizedAlarm;
         } else {
           delete item.alarm;
+        }
+      }
+      if (item.preserveHomeKitNames === undefined && typeof item.nameOverride === 'boolean') {
+        item.preserveHomeKitNames = item.nameOverride;
+      }
+      if (item.preserveHomeKitNames !== undefined && typeof item.preserveHomeKitNames !== 'boolean') {
+        this.log.warn('[Tuya QR] Ignoring invalid preserveHomeKitNames override for id "%s". Use true or false.', id);
+        delete item.preserveHomeKitNames;
+      }
+      delete item.nameOverride;
+      if (item.switchNames !== undefined) {
+        if (!item.switchNames || typeof item.switchNames !== 'object' || Array.isArray(item.switchNames)) {
+          this.log.warn('[Tuya QR] Ignoring invalid switchNames override for id "%s" because it is not an object.', id);
+          delete item.switchNames;
+        } else {
+          const normalizedSwitchNames = {};
+          for (const [rawCode, rawName] of Object.entries(item.switchNames)) {
+            const code = String(rawCode || '').trim();
+            const requestedName = String(rawName || '').trim();
+            if (!code || !requestedName) {
+              continue;
+            }
+            const fallbackName = requestedName.replace(/[^A-Za-z0-9 '\s]/g, ' ').replace(/\s+/g, ' ').trim();
+            const safeName = sanitizeName(requestedName) ?? fallbackName;
+            if (!safeName) {
+              this.log.warn('[Tuya QR] Ignoring invalid switch name for code "%s" on device id "%s".', code, id);
+              continue;
+            }
+            normalizedSwitchNames[code] = safeName;
+          }
+          if (Object.keys(normalizedSwitchNames).length > 0) {
+            item.switchNames = normalizedSwitchNames;
+          } else {
+            delete item.switchNames;
+          }
         }
       }
       if (item.adaptiveLighting !== undefined) {
@@ -292,6 +332,9 @@ class TuyaPlatform {
         alarm: deviceConfig?.alarm ? JSON.stringify(deviceConfig.alarm) : undefined,
         globalAdaptiveLighting: !!this.options.enableAdaptiveLighting,
         adaptiveLighting: deviceConfig?.adaptiveLighting ? JSON.stringify(deviceConfig.adaptiveLighting) : undefined,
+        globalPreserveHomeKitNames: this.options.preserveHomeKitNames !== false,
+        preserveHomeKitNames: typeof deviceConfig?.preserveHomeKitNames === 'boolean' ? deviceConfig.preserveHomeKitNames : undefined,
+        switchNames: deviceConfig?.switchNames ? JSON.stringify(deviceConfig.switchNames) : undefined,
       };
       const { changed: configChanged } = this.configHash.hasConfigChanged(device.id, configToHash);
       device.configChanged = configChanged;

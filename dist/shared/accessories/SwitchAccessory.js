@@ -102,7 +102,7 @@ class SwitchAccessory extends BaseAccessory_1.default {
             const name = schemata.length === 1 ? this.device.name : `${this.device.name} ${switchNum}`;
             // Extract schema info from the cached service's current state
             // In this case we reuse the service without re-adding it
-            (0, Name_1.configureName)(this, service, name);
+            (0, Name_1.configureName)(this, service, name, { overrideName: this.getSwitchNameOverride(subtype) });
         }
         // Other
         (0, CurrentTemperature_1.configureCurrentTemperature)(this, undefined, this.getSchema(...SCHEMA_CODE.CURRENT_TEMP));
@@ -118,10 +118,17 @@ class SwitchAccessory extends BaseAccessory_1.default {
     mainService() {
         return this.Service.Switch;
     }
+    getSwitchNameOverride(schemaCode) {
+        const config = typeof this.platform.getDeviceConfig === 'function'
+            ? this.platform.getDeviceConfig(this.device)
+            : undefined;
+        const value = config?.switchNames?.[schemaCode];
+        return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+    }
     configureSwitch(schema, name) {
         const service = this.accessory.getService(schema.code)
             || this.accessory.addService(this.mainService(), name, schema.code);
-        (0, Name_1.configureName)(this, service, name);
+        (0, Name_1.configureName)(this, service, name, { overrideName: this.getSwitchNameOverride(schema.code) });
         (0, On_1.configureOn)(this, service, schema);
         if (schema.code === this.getSchema(...SCHEMA_CODE.ON)?.code) {
             (0, EnergyUsage_1.configureEnergyUsage)(this.platform.api, this, service, this.getSchema(...SCHEMA_CODE.CURRENT), this.getSchema(...SCHEMA_CODE.POWER), this.getSchema(...SCHEMA_CODE.VOLTAGE), this.getSchema(...SCHEMA_CODE.TOTAL_POWER));

@@ -128,6 +128,55 @@
 </div>
 
 <div class="tuya-nodev-card">
+  <div class="tuya-nodev-title">HomeKit Names</div>
+  <p class="tuya-nodev-small mb-3">
+    Preserve names assigned in Apple Home so multi-gang switches and outlets do not return to generated names such as <em>Brilliant 1</em> and <em>Brilliant 2</em> after every Homebridge restart. You can also set explicit channel names below.
+  </p>
+  <div class="form-check mb-3">
+    <input id="tuyaNodevPreserveNames" class="form-check-input" type="checkbox" checked>
+    <label class="form-check-label" for="tuyaNodevPreserveNames">Preserve names changed in HomeKit</label>
+  </div>
+  <small class="form-text text-muted">Explicit channel names take priority over preserved HomeKit names. Disable preservation only when you want the plugin to reapply generated names at every restart.</small>
+
+  <div class="form-group mt-3">
+    <label for="tuyaNodevSwitchDevice">Select multi-switch / outlet device</label>
+    <select id="tuyaNodevSwitchDevice" class="form-control">
+      <option value="">Load devices first...</option>
+    </select>
+  </div>
+
+  <div id="tuyaNodevSwitchChannels" class="tuya-nodev-table-wrap">
+    <div class="tuya-nodev-small">Select a detected multi-switch device to configure channel names.</div>
+  </div>
+
+  <div class="tuya-nodev-actions">
+    <button id="tuyaNodevLoadSwitchDevices" class="btn btn-outline-primary" type="button">Load Detected Devices</button>
+    <button id="tuyaNodevApplySwitchNames" class="btn btn-primary" type="button">Add / Update Channel Names</button>
+    <button id="tuyaNodevRemoveSwitchNames" class="btn btn-outline-danger" type="button">Remove Channel Name Overrides</button>
+  </div>
+
+  <div id="tuyaNodevSwitchStatus" class="tuya-nodev-ac-status alert alert-secondary">
+    Names changed directly in Apple Home are preserved automatically when the option above is enabled.
+  </div>
+
+  <div class="tuya-nodev-table-wrap">
+    <table class="tuya-nodev-table">
+      <thead>
+        <tr>
+          <th>Device</th>
+          <th>Device ID</th>
+          <th>Configured channel names</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tuyaNodevSwitchOverrideRows">
+        <tr><td colspan="4" class="tuya-nodev-small">No explicit channel-name overrides configured.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="tuya-nodev-card">
   <div class="tuya-nodev-title">Air Conditioner Temperature Overrides</div>
   <p class="tuya-nodev-small mb-3">
     Select a discovered Tuya AC device and set the Home app temperature range. Values are always Celsius; iOS/Home automatically displays Fahrenheit for users who use °F.
@@ -209,6 +258,12 @@
     el.textContent = message;
   }
 
+  function setSwitchStatus(message, type = 'secondary') {
+    const el = $('tuyaNodevSwitchStatus');
+    el.className = `tuya-nodev-ac-status alert alert-${type}`;
+    el.textContent = message;
+  }
+
   function firstNonEmpty(...values) {
     for (const value of values) {
       if (value === undefined || value === null) {
@@ -263,6 +318,7 @@
     }
     cfg.options.projectType = '3';
     cfg.options.enableAdaptiveLighting = $('tuyaNodevAdaptiveLighting')?.checked === true;
+    cfg.options.preserveHomeKitNames = $('tuyaNodevPreserveNames')?.checked !== false;
     if (!Array.isArray(cfg.options.deviceOverrides)) {
       cfg.options.deviceOverrides = [];
     }
@@ -286,6 +342,7 @@
     ensureConfig();
     await homebridge.updatePluginConfig([currentConfig]);
     renderAcOverrides();
+    renderSwitchNameOverrides();
   }
 
   function stopPolling() {
@@ -308,6 +365,191 @@
   function markDirty() {
     isDirty = true;
     enableSaving();
+  }
+
+  function getSwitchCodes(device) {
+    const codes = Array.from(new Set([
+      ...(Array.isArray(device?.schemaCodes) ? device.schemaCodes : []),
+      ...(Array.isArray(device?.statusCodes) ? device.statusCodes : []),
+    ].map((code) => String(code || '').trim()).filter(Boolean)));
+
+    return codes.filter((code) => {
+      if (code === 'switch_inching') return false;
+      return code === 'switch'
+        || /^switch_\d+$/.test(code)
+        || /^switch_usb_?\d+$/.test(code);
+    }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }
+
+  function getSwitchNameOverrides() {
+    const cfg = ensureConfig();
+    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id && item.switchNames && typeof item.switchNames === 'object' && !Array.isArray(item.switchNames));
+  }
+
+  function findDeviceOverride(id) {
+    const cfg = ensureConfig();
+    return (cfg.options.deviceOverrides || []).find((item) => item && item.id === id);
+  }
+
+  function ensureDeviceOverride(id) {
+    const cfg = ensureConfig();
+    let override = (cfg.options.deviceOverrides || []).find((item) => item && item.id === id);
+    if (!override) {
+      override = { id };
+      cfg.options.deviceOverrides.push(override);
+    }
+    return override;
+  }
+
+  function removeEmptyDeviceOverride(id) {
+    const cfg = ensureConfig();
+    const index = cfg.options.deviceOverrides.findIndex((item) => item && item.id === id);
+    if (index < 0) return;
+    const item = cfg.options.deviceOverrides[index];
+    const meaningfulKeys = Object.keys(item).filter((key) => key !== 'id' && item[key] !== undefined && item[key] !== null && item[key] !== '');
+    if (meaningfulKeys.length === 0) {
+      cfg.options.deviceOverrides.splice(index, 1);
+    }
+  }
+
+  function populateSwitchDeviceSelect(devices) {
+    const select = $('tuyaNodevSwitchDevice');
+    const current = select.value;
+    const candidates = devices
+      .map((device) => ({ ...device, switchCodes: getSwitchCodes(device) }))
+      .filter((device) => device.switchCodes.length > 0)
+      .sort((a, b) => {
+        if ((a.switchCodes.length > 1) !== (b.switchCodes.length > 1)) {
+          return a.switchCodes.length > 1 ? -1 : 1;
+        }
+        return String(a.name).localeCompare(String(b.name));
+      });
+
+    if (!candidates.length) {
+      select.innerHTML = '<option value="">No switch/outlet devices found</option>';
+      renderSwitchChannelEditor();
+      return;
+    }
+
+    select.innerHTML = '<option value="">Select a switch/outlet device...</option>' + candidates.map((device) => {
+      const label = `${device.name} — ${device.switchCodes.length} channel${device.switchCodes.length === 1 ? '' : 's'} — ${device.id}`;
+      return `<option value="${escapeHtml(device.id)}">${escapeHtml(label)}</option>`;
+    }).join('');
+
+    if (current && candidates.some((device) => device.id === current)) {
+      select.value = current;
+    }
+    renderSwitchChannelEditor();
+  }
+
+  function renderSwitchChannelEditor() {
+    const container = $('tuyaNodevSwitchChannels');
+    const id = $('tuyaNodevSwitchDevice')?.value || '';
+    if (!id) {
+      container.innerHTML = '<div class="tuya-nodev-small">Select a detected multi-switch device to configure channel names.</div>';
+      return;
+    }
+    const device = detectedDevices.find((item) => item.id === id);
+    const override = findDeviceOverride(id);
+    const configured = override?.switchNames || {};
+    const codes = getSwitchCodes(device || { schemaCodes: Object.keys(configured) });
+    const allCodes = Array.from(new Set([...codes, ...Object.keys(configured)])).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (!allCodes.length) {
+      container.innerHTML = '<div class="tuya-nodev-small">No controllable switch channels were found for this device.</div>';
+      return;
+    }
+    container.innerHTML = `
+      <table class="tuya-nodev-table">
+        <thead><tr><th>Tuya channel</th><th>HomeKit name</th></tr></thead>
+        <tbody>${allCodes.map((code) => `
+          <tr>
+            <td><code>${escapeHtml(code)}</code></td>
+            <td><input class="form-control tuya-nodev-switch-name-input" type="text" data-code="${escapeHtml(code)}" value="${escapeHtml(configured[code] || '')}" placeholder="Leave blank to preserve the HomeKit name"></td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+  }
+
+  function renderSwitchNameOverrides() {
+    const tbody = $('tuyaNodevSwitchOverrideRows');
+    if (!tbody) return;
+    const overrides = getSwitchNameOverrides();
+    if (!overrides.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="tuya-nodev-small">No explicit channel-name overrides configured.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = overrides.map((override) => {
+      const name = getDeviceName(override.id) || 'Unknown / not in detected cache';
+      const names = Object.entries(override.switchNames || {})
+        .map(([code, value]) => `<code>${escapeHtml(code)}</code>: ${escapeHtml(value)}`)
+        .join('<br>');
+      return `
+        <tr>
+          <td>${escapeHtml(name)}</td>
+          <td><code>${escapeHtml(override.id)}</code></td>
+          <td>${names}</td>
+          <td><button class="btn btn-sm btn-outline-secondary tuya-nodev-edit-switch-names" type="button" data-id="${escapeHtml(override.id)}">Edit</button></td>
+        </tr>`;
+    }).join('');
+    tbody.querySelectorAll('.tuya-nodev-edit-switch-names').forEach((button) => {
+      button.addEventListener('click', () => editSwitchNameOverride(button.getAttribute('data-id')));
+    });
+  }
+
+  function editSwitchNameOverride(id) {
+    const select = $('tuyaNodevSwitchDevice');
+    if (!detectedDevices.some((device) => device.id === id)) {
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = `${id} — not currently in detected device cache`;
+      select.appendChild(option);
+    }
+    select.value = id;
+    renderSwitchChannelEditor();
+    select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function addOrUpdateSwitchNames() {
+    const id = $('tuyaNodevSwitchDevice')?.value || '';
+    if (!id) {
+      setSwitchStatus('Select a switch/outlet device first.', 'warning');
+      return;
+    }
+    const inputs = Array.from(document.querySelectorAll('.tuya-nodev-switch-name-input'));
+    const switchNames = {};
+    for (const input of inputs) {
+      const code = String(input.getAttribute('data-code') || '').trim();
+      const value = String(input.value || '').trim();
+      if (code && value) switchNames[code] = value;
+    }
+    const override = ensureDeviceOverride(id);
+    if (Object.keys(switchNames).length > 0) {
+      override.switchNames = switchNames;
+      setSwitchStatus('Explicit channel names staged. Click Save Configuration, then restart Homebridge.', 'success');
+    } else {
+      delete override.switchNames;
+      removeEmptyDeviceOverride(id);
+      setSwitchStatus('No explicit names entered. HomeKit-renamed services will still be preserved by the global option.', 'info');
+    }
+    await syncConfigToUi();
+    markDirty();
+    renderSwitchChannelEditor();
+  }
+
+  async function removeSelectedSwitchNames() {
+    const id = $('tuyaNodevSwitchDevice')?.value || '';
+    if (!id) {
+      setSwitchStatus('Select a switch/outlet device first.', 'warning');
+      return;
+    }
+    const override = findDeviceOverride(id);
+    if (override) {
+      delete override.switchNames;
+      removeEmptyDeviceOverride(id);
+    }
+    await syncConfigToUi();
+    markDirty();
+    renderSwitchChannelEditor();
+    setSwitchStatus('Explicit channel-name overrides removed. Preserved HomeKit names will be used.', 'success');
   }
 
   function getDeviceName(id) {
@@ -375,6 +617,7 @@
     const current = select.value;
     if (!devices.length) {
       select.innerHTML = '<option value="">No detected devices found</option>';
+      populateSwitchDeviceSelect(devices);
       return;
     }
 
@@ -387,6 +630,7 @@
     if (current && devices.some((device) => device.id === current)) {
       select.value = current;
     }
+    populateSwitchDeviceSelect(devices);
   }
 
   async function loadDetectedDevices(showToast = true) {
@@ -760,6 +1004,7 @@
       $('tuyaNodevName').value = currentConfig.name || 'Tuya without developer account';
       if (currentConfig.options?.userCode) setUserCode(currentConfig.options.userCode);
       $('tuyaNodevAdaptiveLighting').checked = currentConfig.options?.enableAdaptiveLighting === true;
+      $('tuyaNodevPreserveNames').checked = currentConfig.options?.preserveHomeKitNames !== false;
       ensureConfig();
 
       if (homebridge.showSchemaForm) homebridge.showSchemaForm();
@@ -775,8 +1020,11 @@
           if (block.options?.userCode) setUserCode(block.options.userCode);
           else if (getUserCode()) setUserCode(getUserCode());
           $('tuyaNodevAdaptiveLighting').checked = block.options?.enableAdaptiveLighting === true;
+          $('tuyaNodevPreserveNames').checked = block.options?.preserveHomeKitNames !== false;
           ensureConfig();
           renderAcOverrides();
+          renderSwitchNameOverrides();
+          renderSwitchChannelEditor();
         }
       });
 
@@ -793,6 +1041,11 @@
         markDirty();
         setStatus('Adaptive Lighting setting changed. Click Save Configuration when ready.', 'info');
       });
+      $('tuyaNodevPreserveNames').addEventListener('change', async () => {
+        await syncConfigToUi();
+        markDirty();
+        setSwitchStatus('HomeKit name preservation setting changed. Click Save Configuration, then restart Homebridge.', 'info');
+      });
       $('tuyaNodevUserCode').addEventListener('input', () => {
         isAuthenticated = false;
         disableSaving();
@@ -801,6 +1054,10 @@
       $('tuyaNodevLoadDevices').addEventListener('click', () => loadDetectedDevices(true));
       $('tuyaNodevApplyAc').addEventListener('click', addOrUpdateAcOverride);
       $('tuyaNodevRemoveAc').addEventListener('click', removeSelectedAcOverride);
+      $('tuyaNodevLoadSwitchDevices').addEventListener('click', () => loadDetectedDevices(true));
+      $('tuyaNodevSwitchDevice').addEventListener('change', renderSwitchChannelEditor);
+      $('tuyaNodevApplySwitchNames').addEventListener('click', addOrUpdateSwitchNames);
+      $('tuyaNodevRemoveSwitchNames').addEventListener('click', removeSelectedSwitchNames);
 
       if (!getUserCode()) {
         await discoverExistingAuth(false);

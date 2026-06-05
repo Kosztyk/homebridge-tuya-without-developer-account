@@ -192,6 +192,57 @@ Optional. Use only when a device is discovered with the wrong category or requir
 
 Use `global` as the override ID to apply an override globally.
 
+### Preserve HomeKit names and name multi-gang channels
+
+Version 1.0.14 preserves names that users assign to individual services in Apple Home or the Homebridge Accessories page. This is especially useful for multi-gang switches and outlets that would otherwise return to generated names such as `Brilliant 1` and `Brilliant 2` after a restart.
+
+The setting is enabled by default and is available in the custom plugin UI:
+
+```text
+HomeKit Names → Preserve names changed in HomeKit
+```
+
+Equivalent configuration:
+
+```json
+{
+  "options": {
+    "userCode": "YOUR_TUYA_USER_CODE",
+    "preserveHomeKitNames": true
+  }
+}
+```
+
+You can also assign deterministic names to individual Tuya switch channels. The Homebridge UI can load detected devices and save these channel names automatically. The internal configuration looks like this:
+
+```json
+{
+  "options": {
+    "userCode": "YOUR_TUYA_USER_CODE",
+    "deviceOverrides": [
+      {
+        "id": "YOUR_MULTI_SWITCH_DEVICE_ID",
+        "switchNames": {
+          "switch_1": "Coffee Machine",
+          "switch_2": "Kitchen Lamp",
+          "switch_usb1": "USB Ports"
+        }
+      }
+    ]
+  }
+}
+```
+
+Name priority is:
+
+```text
+Explicit switchNames override
+→ Existing HomeKit ConfiguredName
+→ Generated device/channel name
+```
+
+Set `deviceOverrides[].preserveHomeKitNames` to `false` for a specific device when you want the plugin to reapply generated names at every restart.
+
 ### Air conditioner temperature limits
 
 Optional. For Wi-Fi AC units, you can limit the Home app setpoint range and step size. Values are always configured in Celsius. If the iPhone/Home app is set to Fahrenheit, HomeKit converts the values automatically.
