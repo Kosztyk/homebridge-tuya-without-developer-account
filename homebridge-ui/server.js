@@ -51,6 +51,30 @@ function looksLikeAirConditioner(device) {
     || ['kt', 'wk', 'air_conditioner', 'airconditioner'].includes(String(device.category || '').toLowerCase());
 }
 
+function looksLikeWindowCovering(device) {
+  const haystack = [
+    device.name,
+    device.category,
+    device.productName,
+    device.productId,
+    device.model,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return [
+    'blind',
+    'blinds',
+    'curtain',
+    'shade',
+    'shutter',
+    'window covering',
+    'roller',
+    'jaluzea',
+    'draperie',
+    'perdea',
+  ].some((needle) => haystack.includes(needle))
+    || ['cl', 'clkg', 'mg', 'mgmt'].includes(String(device.category || '').toLowerCase());
+}
+
 function collectDevicesFromObject(root) {
   const byId = new Map();
 
@@ -134,6 +158,8 @@ function collectDevicesFromObject(root) {
     merged.likelyAirConditioner = looksLikeAirConditioner(merged)
       || merged.statusCodes.includes('temp_set')
       || merged.schemaCodes.includes('temp_set');
+    merged.likelyWindowCovering = looksLikeWindowCovering(merged)
+      || ['control', 'mach_operate', 'percent_state', 'percent_control', 'position', 'control_2', 'percent_control_2'].some((code) => merged.statusCodes.includes(code) || merged.schemaCodes.includes(code));
     merged.label = `${merged.name} (${merged.id})`;
     byId.set(id, merged);
   }

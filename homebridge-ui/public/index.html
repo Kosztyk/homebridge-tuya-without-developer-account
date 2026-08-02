@@ -177,6 +177,60 @@
 </div>
 
 <div class="tuya-nodev-card">
+  <div class="tuya-nodev-title">Blind / Window Covering Overrides</div>
+  <p class="tuya-nodev-small mb-3">
+    Fix Tuya blind calibration mismatches. HomeKit expects <strong>0 = closed</strong> and <strong>100 = open</strong>. Some Tuya motors report the opposite, or have open/close movement commands reversed.
+  </p>
+
+  <div class="form-group">
+    <label for="tuyaNodevCoverDevice">Select blind / curtain device</label>
+    <select id="tuyaNodevCoverDevice" class="form-control">
+      <option value="">Load devices first...</option>
+    </select>
+    <small class="form-text text-muted">Blind-looking devices are listed first when the cached Tuya device list contains enough metadata.</small>
+  </div>
+
+  <div class="form-check mb-2">
+    <input id="tuyaNodevCoverInvert" class="form-check-input" type="checkbox">
+    <label class="form-check-label" for="tuyaNodevCoverInvert">Invert position 0/100</label>
+    <small class="form-text text-muted">Use when the Home app shows open when the blind is actually closed, or closed when it is actually open.</small>
+  </div>
+
+  <div class="form-check mb-2">
+    <input id="tuyaNodevCoverReverse" class="form-check-input" type="checkbox">
+    <label class="form-check-label" for="tuyaNodevCoverReverse">Reverse open/close commands</label>
+    <small class="form-text text-muted">Use when dragging up/open in HomeKit physically closes the blind, or dragging down/closed physically opens it.</small>
+  </div>
+
+  <div class="tuya-nodev-actions">
+    <button id="tuyaNodevLoadCoverDevices" class="btn btn-outline-primary" type="button">Load Detected Devices</button>
+    <button id="tuyaNodevApplyCover" class="btn btn-primary" type="button">Add / Update Blind Override</button>
+    <button id="tuyaNodevRemoveCover" class="btn btn-outline-danger" type="button">Remove Selected Blind Override</button>
+  </div>
+
+  <div id="tuyaNodevCoverStatus" class="tuya-nodev-ac-status alert alert-secondary">
+    Load detected devices after the plugin has authenticated and discovered your Tuya devices at least once.
+  </div>
+
+  <div class="tuya-nodev-table-wrap">
+    <table class="tuya-nodev-table">
+      <thead>
+        <tr>
+          <th>Device</th>
+          <th>Device ID</th>
+          <th>Invert position</th>
+          <th>Reverse control</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tuyaNodevCoverOverrideRows">
+        <tr><td colspan="5" class="tuya-nodev-small">No blind/window-covering overrides configured.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="tuya-nodev-card">
   <div class="tuya-nodev-title">Air Conditioner Temperature Overrides</div>
   <p class="tuya-nodev-small mb-3">
     Select a discovered Tuya AC device and set the Home app temperature range. Values are always Celsius; iOS/Home automatically displays Fahrenheit for users who use °F.
@@ -254,6 +308,13 @@
 
   function setAcStatus(message, type = 'secondary') {
     const el = $('tuyaNodevAcStatus');
+    el.className = `tuya-nodev-ac-status alert alert-${type}`;
+    el.textContent = message;
+  }
+
+  function setCoverStatus(message, type = 'secondary') {
+    const el = $('tuyaNodevCoverStatus');
+    if (!el) return;
     el.className = `tuya-nodev-ac-status alert alert-${type}`;
     el.textContent = message;
   }
@@ -343,6 +404,7 @@
     await homebridge.updatePluginConfig([currentConfig]);
     renderAcOverrides();
     renderSwitchNameOverrides();
+    renderCoverOverrides();
   }
 
   function stopPolling() {
@@ -384,6 +446,148 @@
   function getSwitchNameOverrides() {
     const cfg = ensureConfig();
     return (cfg.options.deviceOverrides || []).filter((item) => item && item.id && item.switchNames && typeof item.switchNames === 'object' && !Array.isArray(item.switchNames));
+  }
+
+
+  function isWindowCoveringDevice(device) {
+    const category = String(device?.category || '').toLowerCase();
+    const codes = Array.from(new Set([
+      ...(Array.isArray(device?.schemaCodes) ? device.schemaCodes : []),
+      ...(Array.isArray(device?.statusCodes) ? device.statusCodes : []),
+    ].map((code) => String(code || '').trim()).filter(Boolean)));
+    return device?.likelyWindowCovering === true
+      || ['cl', 'clkg', 'mg', 'mgmt'].includes(category)
+      || ['control', 'control_2', 'mach_operate', 'percent_state', 'percent_control', 'percent_control_2', 'position'].some((code) => codes.includes(code));
+  }
+
+  function getCoverOverrides() {
+    const cfg = ensureConfig();
+    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id && item.windowCovering && typeof item.windowCovering === 'object' && !Array.isArray(item.windowCovering));
+  }
+
+  function isOnlyCoverOverride(item) {
+    const keys = Object.keys(item || {}).filter((key) => item[key] !== undefined && item[key] !== null && item[key] !== '');
+    return keys.every((key) => ['id', 'windowCovering'].includes(key));
+  }
+
+  function populateCoverDeviceSelect(devices) {
+    const select = $('tuyaNodevCoverDevice');
+    if (!select) return;
+    const current = select.value;
+    const candidates = devices
+      .filter(isWindowCoveringDevice)
+      .sort((a, b) => {
+        if ((a.likelyWindowCovering === true) !== (b.likelyWindowCovering === true)) {
+          return a.likelyWindowCovering === true ? -1 : 1;
+        }
+        return String(a.name).localeCompare(String(b.name));
+      });
+    if (!candidates.length) {
+      select.innerHTML = '<option value="">No blind/curtain devices found</option>';
+      return;
+    }
+    select.innerHTML = '<option value="">Select a blind/curtain device...</option>' + candidates.map((device) => {
+      const tag = device.likelyWindowCovering ? 'blind candidate' : (device.category || 'device');
+      const text = `${device.name} — ${tag} — ${device.id}`;
+      return `<option value="${escapeHtml(device.id)}">${escapeHtml(text)}</option>`;
+    }).join('');
+    if (current && candidates.some((device) => device.id === current)) {
+      select.value = current;
+    }
+  }
+
+  function renderCoverOverrides() {
+    const tbody = $('tuyaNodevCoverOverrideRows');
+    if (!tbody) return;
+    const overrides = getCoverOverrides();
+    if (!overrides.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="tuya-nodev-small">No blind/window-covering overrides configured.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = overrides.map((override) => {
+      const cover = override.windowCovering || {};
+      const name = getDeviceName(override.id) || 'Unknown / not in detected cache';
+      return `
+        <tr>
+          <td>${escapeHtml(name)}</td>
+          <td><code>${escapeHtml(override.id)}</code></td>
+          <td>${cover.invertPosition === true ? 'Yes' : 'No'}</td>
+          <td>${cover.reverseControl === true ? 'Yes' : 'No'}</td>
+          <td><button class="btn btn-sm btn-outline-secondary tuya-nodev-edit-cover" type="button" data-id="${escapeHtml(override.id)}">Edit</button></td>
+        </tr>`;
+    }).join('');
+    tbody.querySelectorAll('.tuya-nodev-edit-cover').forEach((button) => {
+      button.addEventListener('click', () => editCoverOverride(button.getAttribute('data-id')));
+    });
+  }
+
+  function editCoverOverride(id) {
+    const override = getCoverOverrides().find((item) => item.id === id);
+    if (!override) return;
+    const device = detectedDevices.find((item) => item.id === id);
+    const select = $('tuyaNodevCoverDevice');
+    if (!detectedDevices.some((item) => item.id === id)) {
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = `${id} — not currently in detected device cache`;
+      select.appendChild(option);
+    }
+    select.value = id;
+    $('tuyaNodevCoverInvert').checked = override.windowCovering?.invertPosition === true;
+    $('tuyaNodevCoverReverse').checked = override.windowCovering?.reverseControl === true;
+    setCoverStatus(`Editing blind override for ${device?.name || id}.`, 'info');
+    select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function addOrUpdateCoverOverride() {
+    const id = $('tuyaNodevCoverDevice')?.value || '';
+    if (!id) {
+      setCoverStatus('Select a blind/curtain device first.', 'warning');
+      return;
+    }
+    const invertPosition = $('tuyaNodevCoverInvert')?.checked === true;
+    const reverseControl = $('tuyaNodevCoverReverse')?.checked === true;
+    const override = ensureDeviceOverride(id);
+    if (invertPosition || reverseControl) {
+      override.windowCovering = { invertPosition, reverseControl };
+      setCoverStatus('Blind/window-covering override staged. Click Save Configuration, then restart Homebridge.', 'success');
+    } else {
+      delete override.windowCovering;
+      removeEmptyDeviceOverride(id);
+      setCoverStatus('Both options are disabled, so the blind override was removed.', 'info');
+    }
+    await syncConfigToUi();
+    markDirty();
+    renderCoverOverrides();
+  }
+
+  async function removeSelectedCoverOverride() {
+    const id = $('tuyaNodevCoverDevice')?.value || '';
+    if (!id) {
+      setCoverStatus('Select a blind/curtain device first.', 'warning');
+      return;
+    }
+    const cfg = ensureConfig();
+    const before = cfg.options.deviceOverrides.length;
+    cfg.options.deviceOverrides = cfg.options.deviceOverrides.flatMap((item) => {
+      if (!item || String(item.id || '').trim() !== id) {
+        return [item];
+      }
+      if (isOnlyCoverOverride(item)) {
+        return [];
+      }
+      const copy = clone(item);
+      delete copy.windowCovering;
+      return [copy];
+    });
+    await syncConfigToUi();
+    if (cfg.options.deviceOverrides.length === before) {
+      setCoverStatus('No blind/window-covering override existed for the selected device.', 'warning');
+    } else {
+      setCoverStatus('Selected blind/window-covering override removed. Click Save Configuration when ready.', 'success');
+      homebridge.toast.success('Blind override removed from config.', 'Tuya');
+    }
+    markDirty();
   }
 
   function findDeviceOverride(id) {
@@ -618,6 +822,7 @@
     if (!devices.length) {
       select.innerHTML = '<option value="">No detected devices found</option>';
       populateSwitchDeviceSelect(devices);
+      populateCoverDeviceSelect(devices);
       return;
     }
 
@@ -631,6 +836,7 @@
       select.value = current;
     }
     populateSwitchDeviceSelect(devices);
+    populateCoverDeviceSelect(devices);
   }
 
   async function loadDetectedDevices(showToast = true) {
@@ -640,8 +846,11 @@
       detectedDevices = Array.isArray(res.devices) ? res.devices : [];
       populateDeviceSelect(detectedDevices);
       renderAcOverrides();
+      renderCoverOverrides();
       const acCount = detectedDevices.filter((device) => device.likelyAirConditioner).length;
+      const coverCount = detectedDevices.filter(isWindowCoveringDevice).length;
       setAcStatus(`${res.message || 'Device list loaded.'} ${acCount ? `${acCount} AC candidate(s) listed first.` : ''}`.trim(), detectedDevices.length ? 'success' : 'warning');
+      setCoverStatus(`${res.message || 'Device list loaded.'} ${coverCount ? `${coverCount} blind/curtain candidate(s) found.` : ''}`.trim(), detectedDevices.length ? 'success' : 'warning');
       if (showToast) homebridge.toast.success(`Loaded ${detectedDevices.length} detected Tuya device(s).`, 'Tuya');
     } catch (e) {
       setAcStatus(e.message || 'Failed to load detected devices.', 'danger');
@@ -1025,6 +1234,7 @@
           renderAcOverrides();
           renderSwitchNameOverrides();
           renderSwitchChannelEditor();
+          renderCoverOverrides();
         }
       });
 
@@ -1056,8 +1266,16 @@
       $('tuyaNodevRemoveAc').addEventListener('click', removeSelectedAcOverride);
       $('tuyaNodevLoadSwitchDevices').addEventListener('click', () => loadDetectedDevices(true));
       $('tuyaNodevSwitchDevice').addEventListener('change', renderSwitchChannelEditor);
+      $('tuyaNodevCoverDevice').addEventListener('change', () => {
+        const override = findDeviceOverride($('tuyaNodevCoverDevice').value || '');
+        $('tuyaNodevCoverInvert').checked = override?.windowCovering?.invertPosition === true;
+        $('tuyaNodevCoverReverse').checked = override?.windowCovering?.reverseControl === true;
+      });
       $('tuyaNodevApplySwitchNames').addEventListener('click', addOrUpdateSwitchNames);
       $('tuyaNodevRemoveSwitchNames').addEventListener('click', removeSelectedSwitchNames);
+      $('tuyaNodevLoadCoverDevices').addEventListener('click', () => loadDetectedDevices(true));
+      $('tuyaNodevApplyCover').addEventListener('click', addOrUpdateCoverOverride);
+      $('tuyaNodevRemoveCover').addEventListener('click', removeSelectedCoverOverride);
 
       if (!getUserCode()) {
         await discoverExistingAuth(false);

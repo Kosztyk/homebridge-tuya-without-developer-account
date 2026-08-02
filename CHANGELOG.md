@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.15
+
+- Added blind/window-covering position correction options for Tuya calibration mismatches.
+- Added `deviceOverrides[].windowCovering.invertPosition` so Tuya devices that report `100 = closed` can be mapped correctly to HomeKit's required `100 = open`.
+- Added `deviceOverrides[].windowCovering.reverseControl` to swap Tuya open/close commands when motor direction is reversed.
+- Applied position inversion consistently to `CurrentPosition`, `TargetPosition` reads, `TargetPosition` writes, and `PositionState` comparisons.
+- Added advanced per-channel support through `deviceOverrides[].windowCovering.channels.control` and `channels.control_2`.
+- Added a Homebridge custom UI section for selecting detected blind/curtain devices and staging these overrides.
+
 ## 1.0.14
 
 - Preserves service names changed by users in Apple Home/Homebridge instead of resetting multi-gang switch and outlet names on every restart.

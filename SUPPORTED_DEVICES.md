@@ -241,3 +241,7 @@ Not eligible: simple on/off lights, outlets, switches, brightness-only dimmers, 
 
 From v1.0.14, names changed in Apple Home/Homebridge are preserved by default for multi-service accessories. Optional `deviceOverrides[].switchNames` entries can assign explicit names to Tuya channels such as `switch_1`, `switch_2`, and `switch_usb1`.
 
+## Blind / window-covering calibration
+
+From v1.0.15, blinds, curtains, and window coverings support `deviceOverrides[].windowCovering.invertPosition` and `deviceOverrides[].windowCovering.reverseControl`. Use `invertPosition` when the Home app shows open/closed incorrectly because Tuya reports the percentage backward. Use `reverseControl` only when the physical movement direction is reversed.
+

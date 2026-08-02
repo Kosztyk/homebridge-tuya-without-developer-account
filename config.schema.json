@@ -125,26 +125,26 @@
                 "airConditioner": {
                   "type": "object",
                   "title": "Air Conditioner Temperature Limits",
-                  "description": "Optional HomeKit temperature range override for Wi-Fi air conditioners. Values are always Celsius; Home app converts to Fahrenheit automatically for users using °F.",
+                  "description": "Optional HomeKit temperature range override for Wi-Fi air conditioners. Values are always Celsius; Home app converts to Fahrenheit automatically for users using \u00b0F.",
                   "properties": {
                     "minTemperature": {
                       "type": "number",
-                      "title": "Minimum temperature (°C)",
+                      "title": "Minimum temperature (\u00b0C)",
                       "description": "Lowest setpoint exposed to HomeKit. Common values are 16 or 17. Leave empty to use Tuya schema.",
                       "minimum": 0,
                       "maximum": 50
                     },
                     "maxTemperature": {
                       "type": "number",
-                      "title": "Maximum temperature (°C)",
+                      "title": "Maximum temperature (\u00b0C)",
                       "description": "Highest setpoint exposed to HomeKit. Common value is 31. Leave empty to use Tuya schema.",
                       "minimum": 0,
                       "maximum": 60
                     },
                     "temperatureStep": {
                       "type": "number",
-                      "title": "Temperature step (°C)",
-                      "description": "Set to 1 to suppress 0.5 °C steps. Values are Celsius even when Home app displays Fahrenheit.",
+                      "title": "Temperature step (\u00b0C)",
+                      "description": "Set to 1 to suppress 0.5 \u00b0C steps. Values are Celsius even when Home app displays Fahrenheit.",
                       "minimum": 0.1,
                       "maximum": 5,
                       "default": 1
@@ -191,6 +191,45 @@
                       "type": "boolean",
                       "title": "Expose Call/SMS/App/Low Battery switches",
                       "default": false
+                    }
+                  }
+                },
+                "windowCovering": {
+                  "type": "object",
+                  "title": "Blind / Window Covering Options",
+                  "description": "Optional settings for Tuya blinds, curtains and window coverings. Use invertPosition when Tuya reports 100 as closed instead of open. Use reverseControl when open/close movement commands are physically reversed.",
+                  "properties": {
+                    "invertPosition": {
+                      "type": "boolean",
+                      "title": "Invert position 0/100",
+                      "description": "Enable when Tuya percentage meaning is reversed. HomeKit requires 0 = closed and 100 = open; this maps Tuya 0 \u2192 HomeKit 100 and Tuya 100 \u2192 HomeKit 0.",
+                      "default": false
+                    },
+                    "reverseControl": {
+                      "type": "boolean",
+                      "title": "Reverse open/close commands",
+                      "description": "Enable when dragging open in HomeKit makes the blind close, or dragging closed makes it open. This swaps Tuya open/close control commands without changing percentage meaning.",
+                      "default": false
+                    },
+                    "channels": {
+                      "type": "object",
+                      "title": "Per-channel blind options",
+                      "description": "Optional advanced per-channel overrides keyed by HomeKit service subtype, for example control or control_2. Each channel can define invertPosition and/or reverseControl.",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "invertPosition": {
+                            "type": "boolean",
+                            "title": "Invert position 0/100",
+                            "default": false
+                          },
+                          "reverseControl": {
+                            "type": "boolean",
+                            "title": "Reverse open/close commands",
+                            "default": false
+                          }
+                        }
+                      }
                     }
                   }
                 }

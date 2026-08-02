@@ -243,6 +243,74 @@ Explicit switchNames override
 
 Set `deviceOverrides[].preserveHomeKitNames` to `false` for a specific device when you want the plugin to reapply generated names at every restart.
 
+### Blind / window-covering calibration fixes
+
+Version 1.0.15 adds separate correction options for Tuya blinds, curtains, and window coverings whose calibration does not match HomeKit.
+
+HomeKit expects:
+
+```text
+0   = fully closed
+100 = fully open
+```
+
+Some Tuya motors report the opposite after calibration, for example `0 = open` and `100 = closed`. In that case, enable `invertPosition`. This changes both the reported state and the commanded target position.
+
+If the position state is correct but dragging open/closed in the Home app moves the motor in the opposite physical direction, enable `reverseControl`. This swaps Tuya `open` and `close` control commands without changing percentage meaning.
+
+Preferred method:
+
+1. Authenticate and let the plugin discover devices at least once.
+2. Open **Plugins → Tuya without developer account for Homebridge → Settings**.
+3. In **Blind / Window Covering Overrides**, click **Load Detected Devices**.
+4. Select the blind or curtain device.
+5. Enable:
+
+```text
+Invert position 0/100      → fixes wrong open/closed startup state
+Reverse open/close commands → fixes wrong movement direction
+```
+
+6. Click **Add / Update Blind Override**.
+7. Click **Save Configuration** and restart Homebridge.
+
+Equivalent manual config:
+
+```json
+{
+  "options": {
+    "userCode": "YOUR_TUYA_USER_CODE",
+    "deviceOverrides": [
+      {
+        "id": "YOUR_BLIND_DEVICE_ID",
+        "windowCovering": {
+          "invertPosition": true,
+          "reverseControl": false
+        }
+      }
+    ]
+  }
+}
+```
+
+For dual-channel curtain devices, advanced per-channel settings are also supported:
+
+```json
+{
+  "id": "YOUR_CURTAIN_DEVICE_ID",
+  "windowCovering": {
+    "channels": {
+      "control": {
+        "invertPosition": true
+      },
+      "control_2": {
+        "reverseControl": true
+      }
+    }
+  }
+}
+```
+
 ### Air conditioner temperature limits
 
 Optional. For Wi-Fi AC units, you can limit the Home app setpoint range and step size. Values are always configured in Celsius. If the iPhone/Home app is set to Fahrenheit, HomeKit converts the values automatically.

@@ -156,6 +156,40 @@ class TuyaPlatform {
           delete item.alarm;
         }
       }
+      if (item.windowCovering && typeof item.windowCovering === 'object') {
+        const normalizedWindowCovering = {};
+        for (const key of ['invertPosition', 'reverseControl']) {
+          if (typeof item.windowCovering[key] === 'boolean') {
+            normalizedWindowCovering[key] = item.windowCovering[key];
+          }
+        }
+        if (item.windowCovering.channels && typeof item.windowCovering.channels === 'object' && !Array.isArray(item.windowCovering.channels)) {
+          const normalizedChannels = {};
+          for (const [rawChannel, rawChannelConfig] of Object.entries(item.windowCovering.channels)) {
+            const channel = String(rawChannel || '').trim();
+            if (!channel || !rawChannelConfig || typeof rawChannelConfig !== 'object' || Array.isArray(rawChannelConfig)) {
+              continue;
+            }
+            const channelConfig = {};
+            for (const key of ['invertPosition', 'reverseControl']) {
+              if (typeof rawChannelConfig[key] === 'boolean') {
+                channelConfig[key] = rawChannelConfig[key];
+              }
+            }
+            if (Object.keys(channelConfig).length > 0) {
+              normalizedChannels[channel] = channelConfig;
+            }
+          }
+          if (Object.keys(normalizedChannels).length > 0) {
+            normalizedWindowCovering.channels = normalizedChannels;
+          }
+        }
+        if (Object.keys(normalizedWindowCovering).length > 0) {
+          item.windowCovering = normalizedWindowCovering;
+        } else {
+          delete item.windowCovering;
+        }
+      }
       if (item.preserveHomeKitNames === undefined && typeof item.nameOverride === 'boolean') {
         item.preserveHomeKitNames = item.nameOverride;
       }
@@ -330,6 +364,7 @@ class TuyaPlatform {
         airConditioner: deviceConfig?.airConditioner ? JSON.stringify(deviceConfig.airConditioner) : undefined,
         petFeeder: deviceConfig?.petFeeder ? JSON.stringify(deviceConfig.petFeeder) : undefined,
         alarm: deviceConfig?.alarm ? JSON.stringify(deviceConfig.alarm) : undefined,
+        windowCovering: deviceConfig?.windowCovering ? JSON.stringify(deviceConfig.windowCovering) : undefined,
         globalAdaptiveLighting: !!this.options.enableAdaptiveLighting,
         adaptiveLighting: deviceConfig?.adaptiveLighting ? JSON.stringify(deviceConfig.adaptiveLighting) : undefined,
         globalPreserveHomeKitNames: this.options.preserveHomeKitNames !== false,

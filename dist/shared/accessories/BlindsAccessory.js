@@ -26,6 +26,42 @@ class BlindsAccessory extends BaseAccessory_1.default {
         this.configurePositionState();
         this.configureTargetPosition();
     }
+    getWindowCoveringOptions(channelName = 'control') {
+        const deviceConfig = this.device && typeof this.platform.getDeviceConfig === 'function'
+            ? this.platform.getDeviceConfig(this.device)
+            : undefined;
+        const windowCovering = deviceConfig?.windowCovering;
+        const channelConfig = windowCovering && typeof windowCovering === 'object' && windowCovering.channels && typeof windowCovering.channels === 'object'
+            ? windowCovering.channels[channelName]
+            : undefined;
+        const firstBoolean = (...values) => {
+            for (const value of values) {
+                if (typeof value === 'boolean') {
+                    return value;
+                }
+            }
+            return false;
+        };
+        return {
+            invertPosition: firstBoolean(channelConfig?.invertPosition, windowCovering?.invertPosition, deviceConfig?.invertPosition),
+            reverseControl: firstBoolean(channelConfig?.reverseControl, windowCovering?.reverseControl, deviceConfig?.reverseControl, deviceConfig?.reverse),
+        };
+    }
+    toLimitedPosition(value, fallback = 50) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) {
+            return fallback;
+        }
+        return (0, util_1.limit)(number, 0, 100);
+    }
+    rawPositionToHomeKit(value, channelName = 'control') {
+        const position = this.toLimitedPosition(value);
+        return this.getWindowCoveringOptions(channelName).invertPosition ? 100 - position : position;
+    }
+    homeKitPositionToRaw(value, channelName = 'control') {
+        const position = this.toLimitedPosition(value);
+        return this.getWindowCoveringOptions(channelName).invertPosition ? 100 - position : position;
+    }
     /**
      * Configure CurrentPosition characteristic.
      * Read-only value showing actual blind position (0-100%).
@@ -41,18 +77,18 @@ class BlindsAccessory extends BaseAccessory_1.default {
             // Prefer current position schema if available
             if (currentSchema) {
                 const status = this.getStatus(currentSchema.code);
-                return (0, util_1.limit)(status.value, 0, 100);
+                return this.rawPositionToHomeKit(status?.value);
             }
             // Fall back to target position schema
             if (targetSchema) {
                 const status = this.getStatus(targetSchema.code);
-                return (0, util_1.limit)(status.value, 0, 100);
+                return this.rawPositionToHomeKit(status?.value);
             }
             // Fall back to control command status (open/close/stop)
             const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
             if (controlSchema) {
                 const status = this.getStatus(controlSchema.code);
-                return this.controlValueToPosition(status.value);
+                return this.controlValueToPosition(status?.value);
             }
             return 50; // Default to middle position
         });
@@ -76,8 +112,8 @@ class BlindsAccessory extends BaseAccessory_1.default {
             }
             const currentStatus = this.getStatus(currentSchema.code);
             const targetStatus = this.getStatus(targetSchema.code);
-            const currentPos = currentStatus.value;
-            const targetPos = targetStatus.value;
+            const currentPos = this.rawPositionToHomeKit(currentStatus?.value);
+            const targetPos = this.rawPositionToHomeKit(targetStatus?.value);
             if (targetPos > currentPos) {
                 return INCREASING; // Moving up/open
             }
@@ -108,29 +144,30 @@ class BlindsAccessory extends BaseAccessory_1.default {
             // If target position schema exists, use it
             if (targetSchema) {
                 const status = this.getStatus(targetSchema.code);
-                return (0, util_1.limit)(status.value, 0, 100);
+                return this.rawPositionToHomeKit(status?.value);
             }
             // Otherwise, use control schema (open/close/stop)
             if (controlSchema) {
                 const status = this.getStatus(controlSchema.code);
-                return this.controlValueToPosition(status.value);
+                return this.controlValueToPosition(status?.value);
             }
             return this.targetPosition ?? 50;
         })
             .onSet(async (value) => {
-            const targetPos = value;
+            const targetPos = this.toLimitedPosition(value);
             this.targetPosition = targetPos;
             // Clear any pending reset timer
             if (this.positionResetTimer) {
                 clearTimeout(this.positionResetTimer);
                 this.positionResetTimer = undefined;
             }
-            // If we have a percent_control schema, use it directly
+            // If we have a percent_control schema, use it directly, applying optional inversion
             if (targetSchema && targetSchema.code !== 'control' && targetSchema.code !== 'mach_operate') {
-                await this.sendCommands([{ code: targetSchema.code, value: targetPos }], true);
+                const rawTargetPos = this.homeKitPositionToRaw(targetPos);
+                await this.sendCommands([{ code: targetSchema.code, value: rawTargetPos }], true);
             }
             else if (controlSchema) {
-                // Otherwise, use the control schema (open/close/stop)
+                // Otherwise, use the control schema (open/close/stop), applying optional reverseControl
                 const controlValue = this.positionToControlValue(targetPos);
                 await this.sendCommands([{ code: controlSchema.code, value: controlValue }], true);
                 // Schedule idle reset after 30 seconds if device doesn't report position
@@ -145,11 +182,12 @@ class BlindsAccessory extends BaseAccessory_1.default {
      * Convert HomeKit position value (0-100) to Tuya control value (open/close/stop).
      */
     positionToControlValue(position) {
+        const { reverseControl } = this.getWindowCoveringOptions();
         if (position >= 95) {
-            return 'open'; // or 'ZZ' for some devices
+            return reverseControl ? 'close' : 'open'; // or 'ZZ' for some devices
         }
         else if (position <= 5) {
-            return 'close'; // or 'FZ' for some devices
+            return reverseControl ? 'open' : 'close'; // or 'FZ' for some devices
         }
         else {
             return 'stop'; // or 'STOP' for some devices
@@ -159,17 +197,21 @@ class BlindsAccessory extends BaseAccessory_1.default {
      * Convert Tuya control value (open/close/stop) to HomeKit position (0-100).
      */
     controlValueToPosition(value) {
-        const lowerValue = value.toLowerCase();
+        const lowerValue = String(value ?? '').toLowerCase();
+        let position = 50;
         if (lowerValue === 'open' || lowerValue === 'zz') {
-            return 100;
+            position = 100;
         }
         else if (lowerValue === 'close' || lowerValue === 'fz') {
-            return 0;
+            position = 0;
         }
         else if (lowerValue === 'stop' || lowerValue === 'stopped') {
-            return 50;
+            position = this.targetPosition ?? 50;
         }
-        return 50; // Default to middle
+        if (this.getWindowCoveringOptions().reverseControl && position !== 50) {
+            return 100 - position;
+        }
+        return position;
     }
     /**
      * Reset control to idle state after position movement completes.

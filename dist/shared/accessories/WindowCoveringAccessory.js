@@ -41,6 +41,74 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             }
         }
     }
+    getWindowCoveringOptions(i = 0) {
+        const channelName = SCHEMA_CODE[i]?.NAME || 'control';
+        const deviceConfig = this.device && typeof this.platform.getDeviceConfig === 'function'
+            ? this.platform.getDeviceConfig(this.device)
+            : undefined;
+        const windowCovering = deviceConfig?.windowCovering;
+        const channelConfig = windowCovering && typeof windowCovering === 'object' && windowCovering.channels && typeof windowCovering.channels === 'object'
+            ? windowCovering.channels[channelName]
+            : undefined;
+        const firstBoolean = (...values) => {
+            for (const value of values) {
+                if (typeof value === 'boolean') {
+                    return value;
+                }
+            }
+            return false;
+        };
+        return {
+            invertPosition: firstBoolean(channelConfig?.invertPosition, windowCovering?.invertPosition, deviceConfig?.invertPosition),
+            reverseControl: firstBoolean(channelConfig?.reverseControl, windowCovering?.reverseControl, deviceConfig?.reverseControl, deviceConfig?.reverse),
+        };
+    }
+    toLimitedPosition(value, fallback = 50) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) {
+            return fallback;
+        }
+        return (0, util_1.limit)(number, 0, 100);
+    }
+    rawPositionToHomeKit(value, i = 0) {
+        const position = this.toLimitedPosition(value);
+        return this.getWindowCoveringOptions(i).invertPosition ? 100 - position : position;
+    }
+    homeKitPositionToRaw(value, i = 0) {
+        const position = this.toLimitedPosition(value);
+        return this.getWindowCoveringOptions(i).invertPosition ? 100 - position : position;
+    }
+    getControlPosition(value, i = 0) {
+        const lowerValue = String(value ?? '').toLowerCase();
+        let position = 50;
+        if (lowerValue === 'close' || lowerValue === 'fz') {
+            position = 0;
+        }
+        else if (lowerValue === 'stop' || lowerValue === 'stopped') {
+            position = this.targetPosition?.[i] ?? 50;
+        }
+        else if (lowerValue === 'open' || lowerValue === 'zz') {
+            position = 100;
+        }
+        else {
+            this.log.warn('Unknown WindowCovering position control value:', value);
+        }
+        if (this.getWindowCoveringOptions(i).reverseControl && position !== 50) {
+            return 100 - position;
+        }
+        return position;
+    }
+    getControlCommand(value, i, isOldSchema) {
+        const position = this.toLimitedPosition(value);
+        const { reverseControl } = this.getWindowCoveringOptions(i);
+        if (position === 0) {
+            return reverseControl ? (isOldSchema ? 'ZZ' : 'open') : (isOldSchema ? 'FZ' : 'close');
+        }
+        else if (position === 100) {
+            return reverseControl ? (isOldSchema ? 'FZ' : 'close') : (isOldSchema ? 'ZZ' : 'open');
+        }
+        return isOldSchema ? 'STOP' : 'stop';
+    }
     configureCurrentPosition(i) {
         const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
         const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
@@ -51,23 +119,16 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             .onGet(() => {
             if (currentSchema) {
                 const status = this.getStatus(currentSchema.code);
-                return (0, util_1.limit)(status.value, 0, 100);
+                return this.rawPositionToHomeKit(status?.value, i);
             }
             else if (targetSchema) {
                 const status = this.getStatus(targetSchema.code);
-                return (0, util_1.limit)(status.value, 0, 100);
+                return this.rawPositionToHomeKit(status?.value, i);
             }
-            const status = this.getStatus(targetControlSchema.code);
-            if (status.value === 'close' || status.value === 'FZ') {
-                return 0;
+            if (targetControlSchema) {
+                const status = this.getStatus(targetControlSchema.code);
+                return this.getControlPosition(status?.value, i);
             }
-            else if (status.value === 'stop' || status.value === 'STOP') {
-                return 50;
-            }
-            else if (status.value === 'open' || status.value === 'ZZ') {
-                return 100;
-            }
-            this.log.warn('Unknown CurrentPosition:', status.value);
             return 50;
         });
     }
@@ -84,10 +145,12 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             }
             const currentStatus = this.getStatus(currentSchema.code);
             const targetStatus = this.getStatus(targetSchema.code);
-            if (targetStatus.value === 100 && currentStatus.value !== 100) {
+            const currentPosition = this.rawPositionToHomeKit(currentStatus?.value, i);
+            const targetPosition = this.rawPositionToHomeKit(targetStatus?.value, i);
+            if (targetPosition > currentPosition) {
                 return INCREASING;
             }
-            else if (targetStatus.value === 0 && currentStatus.value !== 0) {
+            else if (targetPosition < currentPosition) {
                 return DECREASING;
             }
             else {
@@ -105,10 +168,14 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         service.getCharacteristic(this.Characteristic.TargetPosition)
             .onGet(() => {
             const status = this.getStatus(schema.code);
-            return (0, util_1.limit)(status.value, 0, 100);
+            return this.rawPositionToHomeKit(status?.value, i);
         })
             .onSet(async (value) => {
-            await this.sendCommands([{ code: schema.code, value: value }], true);
+            if (!this.targetPosition) {
+                this.targetPosition = {};
+            }
+            this.targetPosition[i] = this.toLimitedPosition(value);
+            await this.sendCommands([{ code: schema.code, value: this.homeKitPositionToRaw(value, i) }], true);
         });
     }
     configureTargetPositionControl(i) {
@@ -116,35 +183,21 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         if (!schema) {
             return;
         }
-        const isOldSchema = !schema.property.range.includes('open');
+        const range = Array.isArray(schema.property?.range) ? schema.property.range.map((item) => String(item).toLowerCase()) : [];
+        const isOldSchema = range.length > 0 && !range.includes('open');
         const service = this.accessory.getService(SCHEMA_CODE[i].NAME) ||
             this.accessory.addService(this.Service.WindowCovering, SCHEMA_CODE[i].NAME, SCHEMA_CODE[i].NAME);
         service.getCharacteristic(this.Characteristic.TargetPosition)
             .onGet(() => {
             const status = this.getStatus(schema.code);
-            if (status.value === 'close' || status.value === 'FZ') {
-                return 0;
-            }
-            else if (status.value === 'stop' || status.value === 'STOP') {
-                return 50;
-            }
-            else if (status.value === 'open' || status.value === 'ZZ') {
-                return 100;
-            }
-            this.log.warn('Unknown TargetPosition:', status.value);
-            return 50;
+            return this.getControlPosition(status?.value, i);
         })
             .onSet(async (value) => {
-            let control;
-            if (value === 0) {
-                control = isOldSchema ? 'FZ' : 'close';
+            if (!this.targetPosition) {
+                this.targetPosition = {};
             }
-            else if (value === 100) {
-                control = isOldSchema ? 'ZZ' : 'open';
-            }
-            else {
-                control = isOldSchema ? 'STOP' : 'stop';
-            }
+            this.targetPosition[i] = this.toLimitedPosition(value);
+            const control = this.getControlCommand(value, i, isOldSchema);
             await this.sendCommands([{ code: schema.code, value: control }], true);
         })
             .setProps({
