@@ -163,6 +163,14 @@ class TuyaPlatform {
             normalizedWindowCovering[key] = item.windowCovering[key];
           }
         }
+        if (item.windowCovering.settleSeconds !== undefined) {
+          const settleSeconds = Number(item.windowCovering.settleSeconds);
+          if (Number.isFinite(settleSeconds)) {
+            normalizedWindowCovering.settleSeconds = Math.max(5, Math.min(180, Math.round(settleSeconds)));
+          } else {
+            this.log.warn('[Tuya QR] Ignoring invalid windowCovering.settleSeconds override for id "%s". Use a number from 5 to 180.', id);
+          }
+        }
         if (item.windowCovering.channels && typeof item.windowCovering.channels === 'object' && !Array.isArray(item.windowCovering.channels)) {
           const normalizedChannels = {};
           for (const [rawChannel, rawChannelConfig] of Object.entries(item.windowCovering.channels)) {
@@ -174,6 +182,14 @@ class TuyaPlatform {
             for (const key of ['invertPosition', 'reverseControl']) {
               if (typeof rawChannelConfig[key] === 'boolean') {
                 channelConfig[key] = rawChannelConfig[key];
+              }
+            }
+            if (rawChannelConfig.settleSeconds !== undefined) {
+              const settleSeconds = Number(rawChannelConfig.settleSeconds);
+              if (Number.isFinite(settleSeconds)) {
+                channelConfig.settleSeconds = Math.max(5, Math.min(180, Math.round(settleSeconds)));
+              } else {
+                this.log.warn('[Tuya QR] Ignoring invalid windowCovering.channels.%s.settleSeconds override for id "%s". Use a number from 5 to 180.', channel, id);
               }
             }
             if (Object.keys(channelConfig).length > 0) {

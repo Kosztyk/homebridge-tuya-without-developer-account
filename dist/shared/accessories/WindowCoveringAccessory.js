@@ -58,9 +58,19 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             }
             return false;
         };
+        const firstNumber = (...values) => {
+            for (const value of values) {
+                const number = Number(value);
+                if (Number.isFinite(number)) {
+                    return number;
+                }
+            }
+            return 35;
+        };
         return {
             invertPosition: firstBoolean(channelConfig?.invertPosition, windowCovering?.invertPosition, deviceConfig?.invertPosition),
             reverseControl: firstBoolean(channelConfig?.reverseControl, windowCovering?.reverseControl, deviceConfig?.reverseControl, deviceConfig?.reverse),
+            settleSeconds: (0, util_1.limit)(firstNumber(channelConfig?.settleSeconds, windowCovering?.settleSeconds, deviceConfig?.settleSeconds), 5, 180),
         };
     }
     toLimitedPosition(value, fallback = 50) {
@@ -77,6 +87,14 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
     homeKitPositionToRaw(value, i = 0) {
         const position = this.toLimitedPosition(value);
         return this.getWindowCoveringOptions(i).invertPosition ? 100 - position : position;
+    }
+    isControlStopped(value) {
+        const lowerValue = String(value ?? '').toLowerCase();
+        return lowerValue === 'stop' || lowerValue === 'stopped';
+    }
+    isControlMoving(value) {
+        const lowerValue = String(value ?? '').toLowerCase();
+        return lowerValue === 'open' || lowerValue === 'close' || lowerValue === 'zz' || lowerValue === 'fz';
     }
     getControlPosition(value, i = 0) {
         const lowerValue = String(value ?? '').toLowerCase();
@@ -109,6 +127,66 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         }
         return isOldSchema ? 'STOP' : 'stop';
     }
+    getStopCommandForControlSchema(schema) {
+        const range = Array.isArray(schema?.property?.range) ? schema.property.range.map((item) => String(item).toLowerCase()) : [];
+        return range.length > 0 && !range.includes('open') ? 'STOP' : 'stop';
+    }
+    getStatusUpdate(status, code) {
+        if (!code || !Array.isArray(status)) {
+            return undefined;
+        }
+        return status.find((item) => item && item.code === code);
+    }
+    setStatusValue(code, value) {
+        if (!this.device || !code) {
+            return false;
+        }
+        const current = this.device.status.find((item) => item.code === code);
+        if (current) {
+            current.value = value;
+        }
+        else {
+            this.device.status.push({ code, value });
+        }
+        return true;
+    }
+    getPositionStateValue(i) {
+        const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
+        const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
+        const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
+        const { DECREASING, INCREASING, STOPPED } = this.Characteristic.PositionState;
+        if (controlSchema) {
+            const controlStatus = this.getStatus(controlSchema.code);
+            if (this.isControlStopped(controlStatus?.value)) {
+                return STOPPED;
+            }
+            if (this.isControlMoving(controlStatus?.value)) {
+                const targetFromCommand = this.getControlPosition(controlStatus?.value, i);
+                if (targetFromCommand >= 100) {
+                    return INCREASING;
+                }
+                if (targetFromCommand <= 0) {
+                    return DECREASING;
+                }
+            }
+        }
+        if (!currentSchema || !targetSchema) {
+            return STOPPED;
+        }
+        const currentStatus = this.getStatus(currentSchema.code);
+        const targetStatus = this.getStatus(targetSchema.code);
+        const currentPosition = this.rawPositionToHomeKit(currentStatus?.value, i);
+        const targetPosition = this.rawPositionToHomeKit(targetStatus?.value, i);
+        if (targetPosition > currentPosition) {
+            return INCREASING;
+        }
+        else if (targetPosition < currentPosition) {
+            return DECREASING;
+        }
+        else {
+            return STOPPED;
+        }
+    }
     configureCurrentPosition(i) {
         const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
         const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
@@ -133,30 +211,10 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         });
     }
     configurePositionState(i) {
-        const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
-        const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
-        const { DECREASING, INCREASING, STOPPED } = this.Characteristic.PositionState;
         const service = this.accessory.getService(SCHEMA_CODE[i].NAME) ||
             this.accessory.addService(this.Service.WindowCovering, SCHEMA_CODE[i].NAME, SCHEMA_CODE[i].NAME);
         service.getCharacteristic(this.Characteristic.PositionState)
-            .onGet(() => {
-            if (!currentSchema || !targetSchema) {
-                return STOPPED;
-            }
-            const currentStatus = this.getStatus(currentSchema.code);
-            const targetStatus = this.getStatus(targetSchema.code);
-            const currentPosition = this.rawPositionToHomeKit(currentStatus?.value, i);
-            const targetPosition = this.rawPositionToHomeKit(targetStatus?.value, i);
-            if (targetPosition > currentPosition) {
-                return INCREASING;
-            }
-            else if (targetPosition < currentPosition) {
-                return DECREASING;
-            }
-            else {
-                return STOPPED;
-            }
-        });
+            .onGet(() => this.getPositionStateValue(i));
     }
     configureTargetPositionPercent(i) {
         const schema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
@@ -175,6 +233,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 this.targetPosition = {};
             }
             this.targetPosition[i] = this.toLimitedPosition(value);
+            this.clearExternalMovementTimer(i);
             await this.sendCommands([{ code: schema.code, value: this.homeKitPositionToRaw(value, i) }], true);
         });
     }
@@ -197,12 +256,135 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 this.targetPosition = {};
             }
             this.targetPosition[i] = this.toLimitedPosition(value);
+            this.clearExternalMovementTimer(i);
             const control = this.getControlCommand(value, i, isOldSchema);
             await this.sendCommands([{ code: schema.code, value: control }], true);
         })
             .setProps({
             minStep: 50,
         });
+    }
+    clearExternalMovementTimer(i) {
+        if (!this.externalMovementTimers) {
+            return;
+        }
+        const timer = this.externalMovementTimers.get(i);
+        if (timer) {
+            clearTimeout(timer);
+            this.externalMovementTimers.delete(i);
+        }
+    }
+    scheduleExternalMovementSettle(i, reason) {
+        if (!this.externalMovementTimers) {
+            this.externalMovementTimers = new Map();
+        }
+        this.clearExternalMovementTimer(i);
+        const delay = this.getWindowCoveringOptions(i).settleSeconds * 1000;
+        const timer = setTimeout(async () => {
+            this.externalMovementTimers?.delete(i);
+            try {
+                await this.settleExternalMovement(i, reason);
+            }
+            catch (error) {
+                this.log.warn('Failed to settle external window-covering movement: %s', error instanceof Error ? error.message : error);
+            }
+        }, delay);
+        this.externalMovementTimers.set(i, timer);
+    }
+    isCurrentAtTarget(i) {
+        const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
+        const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
+        if (!currentSchema || !targetSchema) {
+            return true;
+        }
+        const currentStatus = this.getStatus(currentSchema.code);
+        const targetStatus = this.getStatus(targetSchema.code);
+        if (!currentStatus || !targetStatus) {
+            return true;
+        }
+        const currentPosition = this.rawPositionToHomeKit(currentStatus.value, i);
+        const targetPosition = this.rawPositionToHomeKit(targetStatus.value, i);
+        return Math.abs(currentPosition - targetPosition) <= 1;
+    }
+    async refreshDeviceFromCloud() {
+        if (!this.device?.id) {
+            return false;
+        }
+        const manager = this.platform.deviceManager || this.deviceManager;
+        if (!manager || typeof manager.updateDevice !== 'function') {
+            return false;
+        }
+        try {
+            await manager.updateDevice(this.device.id);
+            return true;
+        }
+        catch (error) {
+            this.log.debug('Cloud refresh after external movement failed: %s', error instanceof Error ? error.message : error);
+            return false;
+        }
+    }
+    async settleExternalMovement(i, reason) {
+        await this.refreshDeviceFromCloud();
+        const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
+        const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
+        const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
+        if (controlSchema) {
+            const controlStatus = this.getStatus(controlSchema.code);
+            if (this.isControlStopped(controlStatus?.value)) {
+                await this.updateAllValues();
+                return;
+            }
+        }
+        if (this.isCurrentAtTarget(i)) {
+            if (controlSchema) {
+                const controlStatus = this.getStatus(controlSchema.code);
+                if (this.isControlMoving(controlStatus?.value)) {
+                    this.setStatusValue(controlSchema.code, this.getStopCommandForControlSchema(controlSchema));
+                }
+            }
+            await this.updateAllValues();
+            return;
+        }
+        if (currentSchema && targetSchema) {
+            const targetStatus = this.getStatus(targetSchema.code);
+            if (targetStatus) {
+                this.log.debug('Settling external window-covering movement for %s after %s: %s=%o -> %s=%o', SCHEMA_CODE[i].NAME, reason, currentSchema.code, this.getStatus(currentSchema.code)?.value, currentSchema.code, targetStatus.value);
+                this.setStatusValue(currentSchema.code, targetStatus.value);
+            }
+        }
+        if (controlSchema) {
+            const controlStatus = this.getStatus(controlSchema.code);
+            if (this.isControlMoving(controlStatus?.value)) {
+                this.setStatusValue(controlSchema.code, this.getStopCommandForControlSchema(controlSchema));
+            }
+        }
+        await this.updateAllValues();
+    }
+    async onDeviceStatusUpdate(status) {
+        await super.onDeviceStatusUpdate(status);
+        for (let i = 0; i < SCHEMA_CODE.length; i++) {
+            const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
+            const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
+            const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
+            if (!currentSchema && !targetSchema && !controlSchema) {
+                continue;
+            }
+            const currentUpdate = currentSchema ? this.getStatusUpdate(status, currentSchema.code) : undefined;
+            const targetUpdate = targetSchema ? this.getStatusUpdate(status, targetSchema.code) : undefined;
+            const controlUpdate = controlSchema ? this.getStatusUpdate(status, controlSchema.code) : undefined;
+            if (controlUpdate && this.isControlStopped(controlUpdate.value)) {
+                this.clearExternalMovementTimer(i);
+                await this.updateAllValues();
+                continue;
+            }
+            if (this.isCurrentAtTarget(i)) {
+                this.clearExternalMovementTimer(i);
+                continue;
+            }
+            if ((controlUpdate && this.isControlMoving(controlUpdate.value)) || targetUpdate || currentUpdate) {
+                this.scheduleExternalMovementSettle(i, controlUpdate ? `${controlSchema?.code}=${controlUpdate.value}` : 'position update');
+            }
+        }
     }
 }
 exports.default = WindowCoveringAccessory;

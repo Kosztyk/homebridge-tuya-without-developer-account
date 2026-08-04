@@ -245,7 +245,7 @@ Set `deviceOverrides[].preserveHomeKitNames` to `false` for a specific device wh
 
 ### Blind / window-covering calibration fixes
 
-Version 1.0.15 adds separate correction options for Tuya blinds, curtains, and window coverings whose calibration does not match HomeKit.
+Version 1.0.15 added separate correction options for Tuya blinds, curtains, and window coverings whose calibration does not match HomeKit. Version 1.0.16 also fixes blinds getting stuck as Opening/Closing in Apple Home after commands are triggered from the Tuya app by refreshing and settling the state after external movement.
 
 HomeKit expects:
 
@@ -270,6 +270,21 @@ Preferred method:
 Invert position 0/100      → fixes wrong open/closed startup state
 Reverse open/close commands → fixes wrong movement direction
 ```
+
+Optional advanced setting if a blind needs more or less time to finish after a Tuya-app command:
+
+```json
+{
+  "id": "BLIND_DEVICE_ID",
+  "windowCovering": {
+    "invertPosition": true,
+    "reverseControl": false,
+    "settleSeconds": 35
+  }
+}
+```
+
+`settleSeconds` defaults to 35 seconds and can be set from 5 to 180 seconds.
 
 6. Click **Add / Update Blind Override**.
 7. Click **Save Configuration** and restart Homebridge.

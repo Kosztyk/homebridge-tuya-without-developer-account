@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.16
+
+- Fixed blinds/window coverings getting stuck as Opening/Closing in Apple Home after open/close commands are triggered from the Tuya app.
+- `PositionState` now treats Tuya `control=stop` / `stopped` reports as HomeKit `STOPPED` even when Tuya does not update `percent_state` to match `percent_control`.
+- Added a post-external-movement settle timer that refreshes the device from Tuya cloud and forces HomeKit out of moving state when Tuya does not send a final position/stop update.
+- Added optional `deviceOverrides[].windowCovering.settleSeconds` and per-channel `settleSeconds` with a default of 35 seconds.
+
 ## 1.0.15
 
 - Added blind/window-covering position correction options for Tuya calibration mismatches.

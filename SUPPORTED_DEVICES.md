@@ -243,5 +243,5 @@ From v1.0.14, names changed in Apple Home/Homebridge are preserved by default fo
 
 ## Blind / window-covering calibration
 
-From v1.0.15, blinds, curtains, and window coverings support `deviceOverrides[].windowCovering.invertPosition` and `deviceOverrides[].windowCovering.reverseControl`. Use `invertPosition` when the Home app shows open/closed incorrectly because Tuya reports the percentage backward. Use `reverseControl` only when the physical movement direction is reversed.
+From v1.0.15, blinds, curtains, and window coverings support `deviceOverrides[].windowCovering.invertPosition` and `deviceOverrides[].windowCovering.reverseControl`. Use `invertPosition` when the Home app shows open/closed incorrectly because Tuya reports the percentage backward. Use `reverseControl` only when the physical movement direction is reversed. From v1.0.16, externally triggered Tuya-app open/close commands are also settled automatically so Apple Home does not remain stuck as Opening/Closing when Tuya does not send a final position update. Optional `deviceOverrides[].windowCovering.settleSeconds` controls the external movement settle delay, defaulting to 35 seconds.
 

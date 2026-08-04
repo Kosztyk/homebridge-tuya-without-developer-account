@@ -548,8 +548,12 @@
     const invertPosition = $('tuyaNodevCoverInvert')?.checked === true;
     const reverseControl = $('tuyaNodevCoverReverse')?.checked === true;
     const override = ensureDeviceOverride(id);
-    if (invertPosition || reverseControl) {
+    const existingSettleSeconds = Number(override.windowCovering?.settleSeconds);
+    if (invertPosition || reverseControl || Number.isFinite(existingSettleSeconds)) {
       override.windowCovering = { invertPosition, reverseControl };
+      if (Number.isFinite(existingSettleSeconds)) {
+        override.windowCovering.settleSeconds = Math.max(5, Math.min(180, Math.round(existingSettleSeconds)));
+      }
       setCoverStatus('Blind/window-covering override staged. Click Save Configuration, then restart Homebridge.', 'success');
     } else {
       delete override.windowCovering;
