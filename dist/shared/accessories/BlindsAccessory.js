@@ -25,6 +25,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
         this.configureCurrentPosition();
         this.configurePositionState();
         this.configureTargetPosition();
+        this.configureStopSwitch();
         this.scheduleStartupMovementReconcile();
     }
     getWindowCoveringOptions(channelName = 'control') {
@@ -65,6 +66,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
             reverseControl: firstBoolean(channelConfig?.reverseControl, windowCovering?.reverseControl, deviceConfig?.reverseControl, deviceConfig?.reverse),
             settleSeconds: (0, util_1.limit)(firstNumber(channelConfig?.settleSeconds, windowCovering?.settleSeconds, deviceConfig?.settleSeconds), 5, 180),
             trustExternalControlState: firstBooleanDefault(true, channelConfig?.trustExternalControlState, windowCovering?.trustExternalControlState, deviceConfig?.trustExternalControlState),
+            externalControlStateMode: channelConfig?.externalControlStateMode || windowCovering?.externalControlStateMode || deviceConfig?.externalControlStateMode || 'followReverseControl',
         };
     }
     toLimitedPosition(value, fallback = 50) {
@@ -128,7 +130,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
     isWithinHomeKitCommandEchoWindow() {
         return Date.now() < (this.homeKitCommandEchoUntil ?? 0);
     }
-    controlValueToSemanticPosition(value) {
+    controlValueToBasePosition(value) {
         const lowerValue = String(value ?? '').toLowerCase();
         if (lowerValue === 'open' || lowerValue === 'zz') {
             return 100;
@@ -140,6 +142,30 @@ class BlindsAccessory extends BaseAccessory_1.default {
             return this.targetPosition ?? this.getCurrentHomeKitPosition();
         }
         return undefined;
+    }
+    controlValueToExternalPosition(value) {
+        const position = this.controlValueToBasePosition(value);
+        if (position === undefined) {
+            return undefined;
+        }
+        const options = this.getWindowCoveringOptions();
+        const mode = String(options.externalControlStateMode || 'followReverseControl');
+        const shouldReverse = mode === 'reversed' || (mode !== 'normal' && options.reverseControl === true);
+        if (shouldReverse && position !== 50) {
+            return 100 - position;
+        }
+        return position;
+    }
+    controlValueToSemanticPosition(value) {
+        // Deprecated internal name kept for compatibility. External Tuya-app
+        // open/close events must follow the same physical reversal as the
+        // HomeKit command mapping, otherwise calibrated motors can report
+        // Tuya-app Open as HomeKit Closing/Closed.
+        return this.controlValueToExternalPosition(value);
+    }
+    getStopCommandForControlSchema(schema) {
+        const range = Array.isArray(schema?.property?.range) ? schema.property.range.map((item) => String(item).toLowerCase()) : [];
+        return range.length > 0 && !range.includes('open') ? 'STOP' : 'stop';
     }
     scheduleStartupMovementReconcile() {
         if (this.startupMovementTimer) {
@@ -328,6 +354,33 @@ class BlindsAccessory extends BaseAccessory_1.default {
             }
         });
     }
+    configureStopSwitch() {
+        const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
+        if (!controlSchema) {
+            return;
+        }
+        const serviceName = 'Stop Blind';
+        const service = this.accessory.getServiceById(this.Service.Switch, 'blind_stop') ||
+            this.accessory.addService(this.Service.Switch, serviceName, 'blind_stop');
+        const safeName = this.getPreservedServiceName ? this.getPreservedServiceName(service, serviceName) : serviceName;
+        service.setCharacteristic(this.Characteristic.Name, safeName)
+            .setCharacteristic(this.Characteristic.ConfiguredName, safeName);
+        service.getCharacteristic(this.Characteristic.On)
+            .onGet(() => false)
+            .onSet(async (value) => {
+            if (value !== true) {
+                return;
+            }
+            const stopValue = this.getStopCommandForControlSchema(controlSchema);
+            this.clearExternalMovementTimer();
+            this.clearExternalMovementTarget();
+            this.setStatusValue(controlSchema.code, stopValue);
+            await this.sendCommands([{ code: controlSchema.code, value: stopValue }], false);
+            await this.updateAllValues();
+            setTimeout(() => service.updateCharacteristic(this.Characteristic.On, false), 500);
+        });
+    }
+
     /**
      * Convert HomeKit position value (0-100) to Tuya control value (open/close/stop).
      */
@@ -369,7 +422,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
     _resetToIdle() {
         const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
         if (controlSchema) {
-            this.sendCommands([{ code: controlSchema.code, value: 'stop' }]);
+            this.sendCommands([{ code: controlSchema.code, value: this.getStopCommandForControlSchema(controlSchema) }]);
         }
         this.positionResetTimer = undefined;
     }

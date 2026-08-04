@@ -264,6 +264,16 @@
     <small class="form-text text-muted">Use when dragging up/open in HomeKit physically closes the blind, or dragging down/closed physically opens it.</small>
   </div>
 
+  <div class="form-group">
+    <label for="tuyaNodevCoverExternalMode">Tuya app open/close state mapping</label>
+    <select id="tuyaNodevCoverExternalMode" class="form-control">
+      <option value="followReverseControl">Follow Reverse open/close commands</option>
+      <option value="normal">Normal: Tuya app open = HomeKit open</option>
+      <option value="reversed">Reversed: Tuya app open = HomeKit closed</option>
+    </select>
+    <small class="form-text text-muted">Use “Follow Reverse” for most calibrated motors. It fixes Tuya-app Open showing as Closing/Closed when reverse control is enabled.</small>
+  </div>
+
   <div class="tuya-nodev-actions">
     <button id="tuyaNodevLoadCoverDevices" class="btn btn-outline-primary" type="button">Load Detected Devices</button>
     <button id="tuyaNodevApplyCover" class="btn btn-primary" type="button">Add / Update Blind Override</button>
@@ -282,11 +292,12 @@
           <th>Device ID</th>
           <th>Invert position</th>
           <th>Reverse control</th>
+          <th>Tuya app mapping</th>
           <th></th>
         </tr>
       </thead>
       <tbody id="tuyaNodevCoverOverrideRows">
-        <tr><td colspan="5" class="tuya-nodev-small">No blind/window-covering overrides configured.</td></tr>
+        <tr><td colspan="6" class="tuya-nodev-small">No blind/window-covering overrides configured.</td></tr>
       </tbody>
     </table>
   </div>
@@ -734,6 +745,7 @@
           <td><code>${escapeHtml(override.id)}</code></td>
           <td>${cover.invertPosition === true ? 'Yes' : 'No'}</td>
           <td>${cover.reverseControl === true ? 'Yes' : 'No'}</td>
+          <td>${escapeHtml(cover.externalControlStateMode || 'followReverseControl')}</td>
           <td><button class="btn btn-sm btn-outline-secondary tuya-nodev-edit-cover" type="button" data-id="${escapeHtml(override.id)}">Edit</button></td>
         </tr>`;
     }).join('');
@@ -756,6 +768,9 @@
     select.value = id;
     $('tuyaNodevCoverInvert').checked = override.windowCovering?.invertPosition === true;
     $('tuyaNodevCoverReverse').checked = override.windowCovering?.reverseControl === true;
+    if ($('tuyaNodevCoverExternalMode')) {
+      $('tuyaNodevCoverExternalMode').value = override.windowCovering?.externalControlStateMode || 'followReverseControl';
+    }
     setCoverStatus(`Editing blind override for ${device?.name || id}.`, 'info');
     select.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
@@ -768,10 +783,12 @@
     }
     const invertPosition = $('tuyaNodevCoverInvert')?.checked === true;
     const reverseControl = $('tuyaNodevCoverReverse')?.checked === true;
+    const externalControlStateMode = $('tuyaNodevCoverExternalMode')?.value || 'followReverseControl';
     const override = ensureDeviceOverride(id);
     const existingSettleSeconds = Number(override.windowCovering?.settleSeconds);
-    if (invertPosition || reverseControl || Number.isFinite(existingSettleSeconds)) {
-      override.windowCovering = { invertPosition, reverseControl };
+    const hasExternalMode = externalControlStateMode && externalControlStateMode !== 'followReverseControl';
+    if (invertPosition || reverseControl || hasExternalMode || Number.isFinite(existingSettleSeconds)) {
+      override.windowCovering = { invertPosition, reverseControl, externalControlStateMode };
       if (Number.isFinite(existingSettleSeconds)) {
         override.windowCovering.settleSeconds = Math.max(5, Math.min(180, Math.round(existingSettleSeconds)));
       }

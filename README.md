@@ -542,20 +542,29 @@ For deterministic names, you can still use `deviceOverrides[].switchNames`, for 
 }
 ```
 
-### v1.0.21 Tuya-app blind command handling
+### v1.0.22 Tuya-app blind command handling and Stop button
 
-For calibrated blind motors, `windowCovering.trustExternalControlState` defaults to `true`. When a blind is opened or closed from the Tuya app, the plugin treats the Tuya `open` / `close` command as the semantic HomeKit target so Apple Home does not show the opposite Opening/Closing direction or final Open/Closed state.
+For calibrated blind motors, external Tuya-app open/close events now follow the same reversal as HomeKit commands by default. This fixes motors where the Tuya app physically opens the blind but the raw Tuya update looks like `close`, causing Apple Home to show `Closing...` and then `Closed`.
 
-Example:
+A separate HomeKit **Stop Blind** switch is also exposed for blind/window-covering accessories that have a Tuya control DP. Tapping it sends the Tuya `stop` / `STOP` command and then resets the switch tile back to Off.
+
+Recommended configuration for motors that require both position inversion and reversed commands:
 
 ```json
 {
   "id": "BLIND_DEVICE_ID",
   "windowCovering": {
     "invertPosition": true,
-    "reverseControl": false,
+    "reverseControl": true,
     "trustExternalControlState": true,
+    "externalControlStateMode": "followReverseControl",
     "settleSeconds": 35
   }
 }
 ```
+
+Advanced `externalControlStateMode` values:
+
+- `followReverseControl` — default and recommended. Tuya-app state is reversed when `reverseControl` is enabled.
+- `normal` — Tuya `open` always means HomeKit open.
+- `reversed` — Tuya `open` always means HomeKit closed.

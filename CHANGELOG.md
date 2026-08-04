@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.22
+
+- Fixed Tuya-app blind/curtain state handling for calibrated motors where Tuya reports the app-side command string reversed, for example Tuya app Open arrives as a raw close command.
+- External Tuya-app open/close state now follows the same `reverseControl` mapping by default (`externalControlStateMode: "followReverseControl"`), restoring the behavior needed by motors that require both `invertPosition` and `reverseControl`.
+- Applied the external movement fix to both single blind and multi-channel window-covering handlers.
+- Added a HomeKit Stop Blind switch service so users can stop movement at any time without choosing a slider position.
+- Added `windowCovering.externalControlStateMode` with values `followReverseControl`, `normal`, and `reversed` for unusual motors.
+
 ## 1.0.21
 
 - Fixed blinds/window coverings where commands triggered from the Tuya app still appeared reversed in Apple Home.

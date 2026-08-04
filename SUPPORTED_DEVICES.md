@@ -248,19 +248,22 @@ From v1.0.14, names changed in Apple Home/Homebridge are preserved by default fo
 From v1.0.15, blinds, curtains, and window coverings support `deviceOverrides[].windowCovering.invertPosition` and `deviceOverrides[].windowCovering.reverseControl`. Use `invertPosition` when the Home app shows open/closed incorrectly because Tuya reports the percentage backward. Use `reverseControl` only when the physical movement direction is reversed. From v1.0.16, externally triggered Tuya-app open/close commands are also settled automatically so Apple Home does not remain stuck as Opening/Closing when Tuya does not send a final position update. Optional `deviceOverrides[].windowCovering.settleSeconds` controls the external movement settle delay, defaulting to 35 seconds.
 
 
-### v1.0.21 Tuya-app blind command handling
+### v1.0.22 Tuya-app blind command handling and Stop button
 
-For calibrated blind motors, `windowCovering.trustExternalControlState` defaults to `true`. When a blind is opened or closed from the Tuya app, the plugin treats the Tuya `open` / `close` command as the semantic HomeKit target so Apple Home does not show the opposite Opening/Closing direction or final Open/Closed state.
+Blind and curtain accessories now expose a **Stop Blind** switch when the Tuya device has an open/close/stop control DP. This provides a separate HomeKit tile that sends `stop` / `STOP` immediately.
 
-Example:
+External commands sent from the Tuya app now use `externalControlStateMode`, defaulting to `followReverseControl`. This means motors that need `reverseControl: true` for HomeKit commands also get reversed Tuya-app state interpretation, preventing Tuya app Open from appearing as HomeKit Closing/Closed.
+
+Recommended config for reversed calibrated motors:
 
 ```json
 {
   "id": "BLIND_DEVICE_ID",
   "windowCovering": {
     "invertPosition": true,
-    "reverseControl": false,
+    "reverseControl": true,
     "trustExternalControlState": true,
+    "externalControlStateMode": "followReverseControl",
     "settleSeconds": 35
   }
 }

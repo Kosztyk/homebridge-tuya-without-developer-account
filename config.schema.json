@@ -297,9 +297,48 @@
                             "type": "boolean",
                             "title": "Use Tuya app open/close as final state",
                             "default": true
+                          },
+                          "externalControlStateMode": {
+                            "type": "string",
+                            "title": "Tuya app open/close state mapping",
+                            "default": "followReverseControl",
+                            "oneOf": [
+                              {
+                                "title": "Follow Reverse open/close commands",
+                                "const": "followReverseControl"
+                              },
+                              {
+                                "title": "Normal",
+                                "const": "normal"
+                              },
+                              {
+                                "title": "Reversed",
+                                "const": "reversed"
+                              }
+                            ]
                           }
                         }
                       }
+                    },
+                    "externalControlStateMode": {
+                      "type": "string",
+                      "title": "Tuya app open/close state mapping",
+                      "description": "How Homebridge interprets open/close events coming from the Tuya app. followReverseControl is recommended: if Reverse open/close commands is enabled, Tuya-app state is reversed too.",
+                      "default": "followReverseControl",
+                      "oneOf": [
+                        {
+                          "title": "Follow Reverse open/close commands",
+                          "const": "followReverseControl"
+                        },
+                        {
+                          "title": "Normal: Tuya open = HomeKit open",
+                          "const": "normal"
+                        },
+                        {
+                          "title": "Reversed: Tuya open = HomeKit closed",
+                          "const": "reversed"
+                        }
+                      ]
                     }
                   }
                 }

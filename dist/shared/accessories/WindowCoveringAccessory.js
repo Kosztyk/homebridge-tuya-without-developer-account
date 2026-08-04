@@ -39,6 +39,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             else {
                 this.configureTargetPositionControl(i);
             }
+            this.configureStopSwitch(i);
         }
         this.scheduleStartupMovementReconcile(amount);
     }
@@ -59,6 +60,14 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             }
             return false;
         };
+        const firstBooleanDefault = (defaultValue, ...values) => {
+            for (const value of values) {
+                if (typeof value === 'boolean') {
+                    return value;
+                }
+            }
+            return defaultValue;
+        };
         const firstNumber = (...values) => {
             for (const value of values) {
                 const number = Number(value);
@@ -72,6 +81,8 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             invertPosition: firstBoolean(channelConfig?.invertPosition, windowCovering?.invertPosition, deviceConfig?.invertPosition),
             reverseControl: firstBoolean(channelConfig?.reverseControl, windowCovering?.reverseControl, deviceConfig?.reverseControl, deviceConfig?.reverse),
             settleSeconds: (0, util_1.limit)(firstNumber(channelConfig?.settleSeconds, windowCovering?.settleSeconds, deviceConfig?.settleSeconds), 5, 180),
+            trustExternalControlState: firstBooleanDefault(true, channelConfig?.trustExternalControlState, windowCovering?.trustExternalControlState, deviceConfig?.trustExternalControlState),
+            externalControlStateMode: channelConfig?.externalControlStateMode || windowCovering?.externalControlStateMode || deviceConfig?.externalControlStateMode || 'followReverseControl',
         };
     }
     toLimitedPosition(value, fallback = 50) {
@@ -104,15 +115,19 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
     getExternalMovementTarget(i) {
         return this.externalMovementTargets?.get(i);
     }
-    setExternalMovementTarget(i, targetPosition) {
+    setExternalMovementTarget(i, targetPosition, options = {}) {
         if (!this.externalMovementTargets) {
             this.externalMovementTargets = new Map();
+        }
+        if (!this.externalMovementForceFinalStates) {
+            this.externalMovementForceFinalStates = new Map();
         }
         if (!this.targetPosition) {
             this.targetPosition = {};
         }
         const target = this.toLimitedPosition(targetPosition);
         this.externalMovementTargets.set(i, target);
+        this.externalMovementForceFinalStates.set(i, !!options.forceFinalState);
         this.targetPosition[i] = target;
         const service = this.getServiceForIndex(i);
         service.updateCharacteristic(this.Characteristic.TargetPosition, target);
@@ -120,6 +135,19 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
     }
     clearExternalMovementTarget(i) {
         this.externalMovementTargets?.delete(i);
+        this.externalMovementForceFinalStates?.delete(i);
+    }
+    shouldForceExternalMovementFinalState(i) {
+        return this.externalMovementForceFinalStates?.get(i) === true;
+    }
+    markHomeKitCommandEchoWindow(i) {
+        if (!this.homeKitCommandEchoUntil) {
+            this.homeKitCommandEchoUntil = new Map();
+        }
+        this.homeKitCommandEchoUntil.set(i, Date.now() + 5000);
+    }
+    isWithinHomeKitCommandEchoWindow(i) {
+        return Date.now() < (this.homeKitCommandEchoUntil?.get(i) ?? 0);
     }
     getCurrentHomeKitPosition(i) {
         const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
@@ -146,7 +174,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
                 const controlStatus = controlSchema ? this.getStatus(controlSchema.code) : undefined;
                 if (controlSchema && this.isControlMoving(controlStatus?.value)) {
-                    this.setExternalMovementTarget(i, this.getControlPosition(controlStatus?.value, i));
+                    this.setExternalMovementTarget(i, this.getExternalControlPosition(controlStatus?.value, i), { forceFinalState: true });
                     this.scheduleExternalMovementSettle(i, `startup ${controlSchema.code}=${controlStatus?.value}`);
                     continue;
                 }
@@ -156,22 +184,33 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             }
         }, 1500);
     }
-    getControlPosition(value, i = 0) {
+    getBaseControlPosition(value, i = 0) {
         const lowerValue = String(value ?? '').toLowerCase();
-        let position = 50;
         if (lowerValue === 'close' || lowerValue === 'fz') {
-            position = 0;
+            return 0;
         }
-        else if (lowerValue === 'stop' || lowerValue === 'stopped') {
-            position = this.targetPosition?.[i] ?? 50;
+        if (lowerValue === 'stop' || lowerValue === 'stopped') {
+            return this.targetPosition?.[i] ?? 50;
         }
-        else if (lowerValue === 'open' || lowerValue === 'zz') {
-            position = 100;
+        if (lowerValue === 'open' || lowerValue === 'zz') {
+            return 100;
         }
-        else {
-            this.log.warn('Unknown WindowCovering position control value:', value);
-        }
+        this.log.warn('Unknown WindowCovering position control value:', value);
+        return 50;
+    }
+    getControlPosition(value, i = 0) {
+        const position = this.getBaseControlPosition(value, i);
         if (this.getWindowCoveringOptions(i).reverseControl && position !== 50) {
+            return 100 - position;
+        }
+        return position;
+    }
+    getExternalControlPosition(value, i = 0) {
+        const position = this.getBaseControlPosition(value, i);
+        const options = this.getWindowCoveringOptions(i);
+        const mode = String(options.externalControlStateMode || 'followReverseControl');
+        const shouldReverse = mode === 'reversed' || (mode !== 'normal' && options.reverseControl === true);
+        if (shouldReverse && position !== 50) {
             return 100 - position;
         }
         return position;
@@ -300,6 +339,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 this.targetPosition = {};
             }
             this.targetPosition[i] = this.toLimitedPosition(value);
+            this.markHomeKitCommandEchoWindow(i);
             this.clearExternalMovementTarget(i);
             this.clearExternalMovementTimer(i);
             await this.sendCommands([{ code: schema.code, value: this.homeKitPositionToRaw(value, i) }], true);
@@ -327,6 +367,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 this.targetPosition = {};
             }
             this.targetPosition[i] = this.toLimitedPosition(value);
+            this.markHomeKitCommandEchoWindow(i);
             this.clearExternalMovementTarget(i);
             this.clearExternalMovementTimer(i);
             const control = this.getControlCommand(value, i, isOldSchema);
@@ -336,6 +377,34 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             minStep: 50,
         });
     }
+    configureStopSwitch(i) {
+        const schema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
+        if (!schema) {
+            return;
+        }
+        const subtype = `blind_stop_${SCHEMA_CODE[i].NAME}`;
+        const defaultName = i === 0 ? 'Stop Blind' : `Stop Blind ${i + 1}`;
+        const service = this.accessory.getServiceById(this.Service.Switch, subtype) ||
+            this.accessory.addService(this.Service.Switch, defaultName, subtype);
+        const safeName = this.getPreservedServiceName ? this.getPreservedServiceName(service, defaultName) : defaultName;
+        service.setCharacteristic(this.Characteristic.Name, safeName)
+            .setCharacteristic(this.Characteristic.ConfiguredName, safeName);
+        service.getCharacteristic(this.Characteristic.On)
+            .onGet(() => false)
+            .onSet(async (value) => {
+            if (value !== true) {
+                return;
+            }
+            const stopValue = this.getStopCommandForControlSchema(schema);
+            this.clearExternalMovementTimer(i);
+            this.clearExternalMovementTarget(i);
+            this.setStatusValue(schema.code, stopValue);
+            await this.sendCommands([{ code: schema.code, value: stopValue }], false);
+            await this.updateAllValues();
+            setTimeout(() => service.updateCharacteristic(this.Characteristic.On, false), 500);
+        });
+    }
+
     clearExternalMovementTimer(i) {
         if (!this.externalMovementTimers) {
             return;
@@ -402,11 +471,12 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
         const externalTarget = this.getExternalMovementTarget(i);
         if (externalTarget !== undefined) {
-            // Only force guessed final position for control-only motors. With
-            // percent_state / percent_control present, keep the refreshed Tuya
-            // position because open/close command strings can be reversed by Tuya
-            // calibration.
-            if (!targetSchema && !currentSchema) {
+            // When the movement came from the Tuya app and the user trusts
+            // external control state, force the final HomeKit endpoint using the
+            // same reverseControl-aware mapping as HomeKit commands. This fixes
+            // motors where Tuya's percent DPs remain stale or report the
+            // calibrated opposite after app-side open/close commands.
+            if (this.shouldForceExternalMovementFinalState(i) || (!targetSchema && !currentSchema)) {
                 const rawTarget = this.homeKitPositionToRaw(externalTarget, i);
                 if (targetSchema) {
                     this.setStatusValue(targetSchema.code, rawTarget);
@@ -475,22 +545,27 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 await this.updateAllValues();
                 continue;
             }
-            if (this.isCurrentAtTarget(i)) {
-                this.clearExternalMovementTimer(i);
-                continue;
-            }
             if (controlUpdate && this.isControlMoving(controlUpdate.value)) {
+                const options = this.getWindowCoveringOptions(i);
+                const isHomeKitEcho = this.isWithinHomeKitCommandEchoWindow(i);
+                if (!isHomeKitEcho && options.trustExternalControlState !== false) {
+                    const externalTarget = this.getExternalControlPosition(controlUpdate.value, i);
+                    this.setExternalMovementTarget(i, externalTarget, { forceFinalState: true });
+                    this.scheduleExternalMovementSettle(i, `${controlSchema?.code}=${controlUpdate.value}`);
+                    await this.updateAllValues();
+                    continue;
+                }
                 if (currentSchema || targetSchema) {
-                    // Do not let the Tuya command text become authoritative for
-                    // calibrated/reversed motors. The percent DPs determine real
-                    // HomeKit direction/final state; this timer only prevents stale
-                    // Opening/Closing.
                     this.scheduleExternalMovementSettle(i, `${controlSchema?.code}=${controlUpdate.value}`);
                     await this.updateAllValues();
                     continue;
                 }
                 this.setExternalMovementTarget(i, this.getControlPosition(controlUpdate.value, i));
                 this.scheduleExternalMovementSettle(i, `${controlSchema?.code}=${controlUpdate.value}`);
+                continue;
+            }
+            if (this.isCurrentAtTarget(i)) {
+                this.clearExternalMovementTimer(i);
                 continue;
             }
             if (targetUpdate || currentUpdate) {
