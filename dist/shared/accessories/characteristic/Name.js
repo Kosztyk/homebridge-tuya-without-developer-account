@@ -46,20 +46,32 @@ function configureName(accessory, service, name, options = {}) {
         service.addOptionalCharacteristic(accessory.Characteristic.ConfiguredName);
     }
 
-    const configuredCharacteristic = service.getCharacteristic(accessory.Characteristic.ConfiguredName);
-    const currentConfiguredName = hadConfiguredName && typeof configuredCharacteristic.value === 'string'
-        ? configuredCharacteristic.value.trim()
-        : '';
+    const getCurrentValue = (characteristicType) => {
+        try {
+            if (service.testCharacteristic(characteristicType)) {
+                const value = service.getCharacteristic(characteristicType).value;
+                return typeof value === 'string' ? value.trim() : '';
+            }
+        }
+        catch (_error) {
+            // Ignore malformed cached values and fall back to the generated name.
+        }
+        return '';
+    };
+    const currentConfiguredName = getCurrentValue(accessory.Characteristic.ConfiguredName);
+    const currentName = getCurrentValue(accessory.Characteristic.Name);
 
     let targetName;
     if (forcedName) {
         targetName = forcedName;
     }
-    else if (preserveExisting && currentConfiguredName) {
-        // Preserve names changed by the user in Apple Home/Homebridge. If an
-        // older cached name is invalid, correct it once rather than reverting
-        // to the generated default.
-        targetName = toSafeName(currentConfiguredName, generatedName);
+    else if (preserveExisting) {
+        // Apple Home/Homebridge may persist a user rename either as
+        // ConfiguredName or as Name depending on platform/version and service
+        // type. Preserve either valid value rather than replacing it on start.
+        targetName = toSafeName(currentConfiguredName, undefined)
+            || toSafeName(currentName, undefined)
+            || generatedName;
     }
     else {
         targetName = generatedName;

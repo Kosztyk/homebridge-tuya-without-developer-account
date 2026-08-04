@@ -25,6 +25,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
         this.configureCurrentPosition();
         this.configurePositionState();
         this.configureTargetPosition();
+        this.scheduleStartupMovementReconcile();
     }
     getWindowCoveringOptions(channelName = 'control') {
         const deviceConfig = this.device && typeof this.platform.getDeviceConfig === 'function'
@@ -80,6 +81,54 @@ class BlindsAccessory extends BaseAccessory_1.default {
         const lowerValue = String(value ?? '').toLowerCase();
         return lowerValue === 'open' || lowerValue === 'close' || lowerValue === 'zz' || lowerValue === 'fz';
     }
+    getService() {
+        return this.accessory.getService(this.Service.WindowCovering) ||
+            this.accessory.addService(this.Service.WindowCovering);
+    }
+    getCurrentHomeKitPosition() {
+        const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_POSITION);
+        const targetSchema = this.getSchema(...SCHEMA_CODE.TARGET_POSITION) ||
+            this.getSchema(...SCHEMA_CODE.POSITION);
+        const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
+        if (currentSchema) {
+            return this.rawPositionToHomeKit(this.getStatus(currentSchema.code)?.value);
+        }
+        if (targetSchema) {
+            return this.rawPositionToHomeKit(this.getStatus(targetSchema.code)?.value);
+        }
+        if (controlSchema) {
+            return this.controlValueToPosition(this.getStatus(controlSchema.code)?.value);
+        }
+        return this.targetPosition ?? 50;
+    }
+    setExternalMovementTarget(targetPosition) {
+        this.externalMovementTarget = this.toLimitedPosition(targetPosition);
+        this.targetPosition = this.externalMovementTarget;
+        const service = this.getService();
+        service.updateCharacteristic(this.Characteristic.TargetPosition, this.externalMovementTarget);
+        service.updateCharacteristic(this.Characteristic.PositionState, this.getPositionStateValue());
+    }
+    clearExternalMovementTarget() {
+        this.externalMovementTarget = undefined;
+    }
+    scheduleStartupMovementReconcile() {
+        if (this.startupMovementTimer) {
+            clearTimeout(this.startupMovementTimer);
+        }
+        this.startupMovementTimer = setTimeout(() => {
+            this.startupMovementTimer = undefined;
+            const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
+            const controlStatus = controlSchema ? this.getStatus(controlSchema.code) : undefined;
+            if (controlSchema && this.isControlMoving(controlStatus?.value)) {
+                this.setExternalMovementTarget(this.controlValueToPosition(controlStatus?.value));
+                this.scheduleExternalMovementSettle(`startup ${controlSchema.code}=${controlStatus?.value}`);
+                return;
+            }
+            if (!this.isCurrentAtTarget()) {
+                this.scheduleExternalMovementSettle('startup position mismatch');
+            }
+        }, 1500);
+    }
     getStatusUpdate(status, code) {
         if (!code || !Array.isArray(status)) {
             return undefined;
@@ -107,8 +156,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
         const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_POSITION);
         const targetSchema = this.getSchema(...SCHEMA_CODE.TARGET_POSITION) ||
             this.getSchema(...SCHEMA_CODE.POSITION);
-        const service = this.accessory.getService(this.Service.WindowCovering) ||
-            this.accessory.addService(this.Service.WindowCovering);
+        const service = this.getService();
         service.getCharacteristic(this.Characteristic.CurrentPosition)
             .onGet(() => {
             // Prefer current position schema if available
@@ -142,7 +190,16 @@ class BlindsAccessory extends BaseAccessory_1.default {
                 return STOPPED;
             }
             if (this.isControlMoving(controlStatus?.value)) {
-                const targetFromCommand = this.controlValueToPosition(controlStatus?.value);
+                const targetFromCommand = this.externalMovementTarget !== undefined
+                    ? this.externalMovementTarget
+                    : this.controlValueToPosition(controlStatus?.value);
+                const currentPosition = this.getCurrentHomeKitPosition();
+                if (targetFromCommand > currentPosition) {
+                    return INCREASING;
+                }
+                if (targetFromCommand < currentPosition) {
+                    return DECREASING;
+                }
                 if (targetFromCommand >= 100) {
                     return INCREASING;
                 }
@@ -174,8 +231,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
      * Indicates if blinds are going up (INCREASING), down (DECREASING), or stopped.
      */
     configurePositionState() {
-        const service = this.accessory.getService(this.Service.WindowCovering) ||
-            this.accessory.addService(this.Service.WindowCovering);
+        const service = this.getService();
         service.getCharacteristic(this.Characteristic.PositionState)
             .onGet(() => this.getPositionStateValue());
     }
@@ -191,10 +247,12 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.log.warn('No target position schema available for blinds control');
             return;
         }
-        const service = this.accessory.getService(this.Service.WindowCovering) ||
-            this.accessory.addService(this.Service.WindowCovering);
+        const service = this.getService();
         service.getCharacteristic(this.Characteristic.TargetPosition)
             .onGet(() => {
+            if (this.externalMovementTarget !== undefined) {
+                return this.externalMovementTarget;
+            }
             // If target position schema exists, use it
             if (targetSchema) {
                 const status = this.getStatus(targetSchema.code);
@@ -210,6 +268,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
             .onSet(async (value) => {
             const targetPos = this.toLimitedPosition(value);
             this.targetPosition = targetPos;
+            this.clearExternalMovementTarget();
             this.clearExternalMovementTimer();
             // Clear any pending reset timer
             if (this.positionResetTimer) {
@@ -336,6 +395,24 @@ class BlindsAccessory extends BaseAccessory_1.default {
         const targetSchema = this.getSchema(...SCHEMA_CODE.TARGET_POSITION) ||
             this.getSchema(...SCHEMA_CODE.POSITION);
         const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_POSITION);
+        if (this.externalMovementTarget !== undefined) {
+            const rawTarget = this.homeKitPositionToRaw(this.externalMovementTarget);
+            if (targetSchema) {
+                this.setStatusValue(targetSchema.code, rawTarget);
+            }
+            if (currentSchema) {
+                this.setStatusValue(currentSchema.code, rawTarget);
+            }
+            if (controlSchema) {
+                const controlStatus = this.getStatus(controlSchema.code);
+                if (this.isControlMoving(controlStatus?.value)) {
+                    this.setStatusValue(controlSchema.code, 'stop');
+                }
+            }
+            this.clearExternalMovementTarget();
+            await this.updateAllValues();
+            return;
+        }
         if (controlSchema) {
             const controlStatus = this.getStatus(controlSchema.code);
             if (this.isControlStopped(controlStatus?.value)) {
@@ -389,6 +466,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
         const controlUpdate = controlSchema ? this.getStatusUpdate(status, controlSchema.code) : undefined;
         if (controlUpdate && this.isControlStopped(controlUpdate.value)) {
             this.clearExternalMovementTimer();
+            this.clearExternalMovementTarget();
             await this.updateAllValues();
             return;
         }
@@ -396,8 +474,13 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.clearExternalMovementTimer();
             return;
         }
-        if ((controlUpdate && this.isControlMoving(controlUpdate.value)) || targetUpdate || currentUpdate) {
-            this.scheduleExternalMovementSettle(controlUpdate ? `${controlSchema?.code}=${controlUpdate.value}` : 'position update');
+        if (controlUpdate && this.isControlMoving(controlUpdate.value)) {
+            this.setExternalMovementTarget(this.controlValueToPosition(controlUpdate.value));
+            this.scheduleExternalMovementSettle(`${controlSchema?.code}=${controlUpdate.value}`);
+            return;
+        }
+        if (targetUpdate || currentUpdate) {
+            this.scheduleExternalMovementSettle('position update');
         }
     }
 }

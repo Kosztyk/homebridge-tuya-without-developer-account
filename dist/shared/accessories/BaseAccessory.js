@@ -95,24 +95,57 @@ class BaseAccessory {
         this.addAccessoryInfoService();
         this.addBatteryService();
     }
+    shouldPreserveHomeKitNames() {
+        const globalSetting = this.platform?.options?.preserveHomeKitNames !== false;
+        const deviceConfig = this.device && typeof this.platform?.getDeviceConfig === 'function'
+            ? this.platform.getDeviceConfig(this.device)
+            : undefined;
+        if (typeof deviceConfig?.preserveHomeKitNames === 'boolean') {
+            return deviceConfig.preserveHomeKitNames;
+        }
+        return globalSetting;
+    }
+    getPreservedServiceName(service, fallbackName) {
+        const fallback = (0, util_1.sanitizeName)(fallbackName) ?? 'Tuya Device';
+        const candidates = [];
+        for (const characteristicType of [this.Characteristic.ConfiguredName, this.Characteristic.Name]) {
+            try {
+                if (service.testCharacteristic(characteristicType)) {
+                    const value = service.getCharacteristic(characteristicType).value;
+                    if (typeof value === 'string' && value.trim()) {
+                        candidates.push(value.trim());
+                    }
+                }
+            }
+            catch (_error) {
+                // Ignore malformed cached characteristics and fall back below.
+            }
+        }
+        if (this.shouldPreserveHomeKitNames()) {
+            for (const candidate of candidates) {
+                const safe = (0, util_1.sanitizeName)(candidate);
+                if (safe) {
+                    return safe;
+                }
+            }
+        }
+        return fallback;
+    }
     addAccessoryInfoService() {
         const service = this.accessory.getService(this.Service.AccessoryInformation)
             || this.accessory.addService(this.Service.AccessoryInformation);
-        if (!this.device) {
-            // Use fallback values if device is not available yet
-            const safeName = (0, util_1.sanitizeName)(this.accessory.displayName) ?? 'Tuya Device';
-            service
-                .setCharacteristic(this.Characteristic.Manufacturer, MANUFACTURER)
-                .setCharacteristic(this.Characteristic.Name, safeName)
-                .setCharacteristic(this.Characteristic.ConfiguredName, safeName);
-            return;
-        }
-        const safeName = (0, util_1.sanitizeName)(this.device.name) ?? (this.device.id || 'Tuya Device');
+        const defaultName = this.device
+            ? ((0, util_1.sanitizeName)(this.device.name) ?? (this.device.id || 'Tuya Device'))
+            : ((0, util_1.sanitizeName)(this.accessory.displayName) ?? 'Tuya Device');
+        const safeName = this.getPreservedServiceName(service, defaultName);
         service
             .setCharacteristic(this.Characteristic.Manufacturer, MANUFACTURER)
-            .setCharacteristic(this.Characteristic.Model, this.device.model || this.device.product_name || this.device.product_id)
             .setCharacteristic(this.Characteristic.Name, safeName)
             .setCharacteristic(this.Characteristic.ConfiguredName, safeName);
+        if (!this.device) {
+            return;
+        }
+        service.setCharacteristic(this.Characteristic.Model, this.device.model || this.device.product_name || this.device.product_id);
         const serialNumber = typeof this.device.uuid === 'string' ? this.device.uuid.trim() : '';
         if (serialNumber.length > 1) {
             service.setCharacteristic(this.Characteristic.SerialNumber, serialNumber);

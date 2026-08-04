@@ -1,4 +1,11 @@
 # Changelog
+## 1.0.17
+
+- Fixed external Tuya-app blind/curtain open/close updates being interpreted with the wrong direction when invert/reverse calibration is enabled.
+- External open/close commands now keep an authoritative HomeKit movement target until Tuya settles, so Apple Home no longer flips to the opposite Opening/Closing or final Closed/Open state.
+- Added startup reconciliation for blinds/window coverings so stale Tuya moving states are settled after Homebridge restart without needing a manual tap in Apple Home.
+- Hardened HomeKit name preservation by preserving either existing `ConfiguredName` or existing `Name`, and by avoiding AccessoryInformation name resets when name preservation is enabled.
+
 
 ## 1.0.16
 

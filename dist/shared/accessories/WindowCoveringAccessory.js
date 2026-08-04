@@ -40,6 +40,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 this.configureTargetPositionControl(i);
             }
         }
+        this.scheduleStartupMovementReconcile(amount);
     }
     getWindowCoveringOptions(i = 0) {
         const channelName = SCHEMA_CODE[i]?.NAME || 'control';
@@ -95,6 +96,65 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
     isControlMoving(value) {
         const lowerValue = String(value ?? '').toLowerCase();
         return lowerValue === 'open' || lowerValue === 'close' || lowerValue === 'zz' || lowerValue === 'fz';
+    }
+    getServiceForIndex(i) {
+        return this.accessory.getService(SCHEMA_CODE[i].NAME) ||
+            this.accessory.addService(this.Service.WindowCovering, SCHEMA_CODE[i].NAME, SCHEMA_CODE[i].NAME);
+    }
+    getExternalMovementTarget(i) {
+        return this.externalMovementTargets?.get(i);
+    }
+    setExternalMovementTarget(i, targetPosition) {
+        if (!this.externalMovementTargets) {
+            this.externalMovementTargets = new Map();
+        }
+        if (!this.targetPosition) {
+            this.targetPosition = {};
+        }
+        const target = this.toLimitedPosition(targetPosition);
+        this.externalMovementTargets.set(i, target);
+        this.targetPosition[i] = target;
+        const service = this.getServiceForIndex(i);
+        service.updateCharacteristic(this.Characteristic.TargetPosition, target);
+        service.updateCharacteristic(this.Characteristic.PositionState, this.getPositionStateValue(i));
+    }
+    clearExternalMovementTarget(i) {
+        this.externalMovementTargets?.delete(i);
+    }
+    getCurrentHomeKitPosition(i) {
+        const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
+        const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
+        const targetControlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
+        if (currentSchema) {
+            return this.rawPositionToHomeKit(this.getStatus(currentSchema.code)?.value, i);
+        }
+        if (targetSchema) {
+            return this.rawPositionToHomeKit(this.getStatus(targetSchema.code)?.value, i);
+        }
+        if (targetControlSchema) {
+            return this.getControlPosition(this.getStatus(targetControlSchema.code)?.value, i);
+        }
+        return this.targetPosition?.[i] ?? 50;
+    }
+    scheduleStartupMovementReconcile(amount = 1) {
+        if (this.startupMovementTimer) {
+            clearTimeout(this.startupMovementTimer);
+        }
+        this.startupMovementTimer = setTimeout(() => {
+            this.startupMovementTimer = undefined;
+            for (let i = 0; i < amount; i++) {
+                const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
+                const controlStatus = controlSchema ? this.getStatus(controlSchema.code) : undefined;
+                if (controlSchema && this.isControlMoving(controlStatus?.value)) {
+                    this.setExternalMovementTarget(i, this.getControlPosition(controlStatus?.value, i));
+                    this.scheduleExternalMovementSettle(i, `startup ${controlSchema.code}=${controlStatus?.value}`);
+                    continue;
+                }
+                if (!this.isCurrentAtTarget(i)) {
+                    this.scheduleExternalMovementSettle(i, 'startup position mismatch');
+                }
+            }
+        }, 1500);
     }
     getControlPosition(value, i = 0) {
         const lowerValue = String(value ?? '').toLowerCase();
@@ -161,7 +221,16 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 return STOPPED;
             }
             if (this.isControlMoving(controlStatus?.value)) {
-                const targetFromCommand = this.getControlPosition(controlStatus?.value, i);
+                const targetFromCommand = this.getExternalMovementTarget(i) !== undefined
+                    ? this.getExternalMovementTarget(i)
+                    : this.getControlPosition(controlStatus?.value, i);
+                const currentPosition = this.getCurrentHomeKitPosition(i);
+                if (targetFromCommand > currentPosition) {
+                    return INCREASING;
+                }
+                if (targetFromCommand < currentPosition) {
+                    return DECREASING;
+                }
                 if (targetFromCommand >= 100) {
                     return INCREASING;
                 }
@@ -191,8 +260,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
         const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
         const targetControlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
-        const service = this.accessory.getService(SCHEMA_CODE[i].NAME) ||
-            this.accessory.addService(this.Service.WindowCovering, SCHEMA_CODE[i].NAME, SCHEMA_CODE[i].NAME);
+        const service = this.getServiceForIndex(i);
         service.getCharacteristic(this.Characteristic.CurrentPosition)
             .onGet(() => {
             if (currentSchema) {
@@ -211,8 +279,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         });
     }
     configurePositionState(i) {
-        const service = this.accessory.getService(SCHEMA_CODE[i].NAME) ||
-            this.accessory.addService(this.Service.WindowCovering, SCHEMA_CODE[i].NAME, SCHEMA_CODE[i].NAME);
+        const service = this.getServiceForIndex(i);
         service.getCharacteristic(this.Characteristic.PositionState)
             .onGet(() => this.getPositionStateValue(i));
     }
@@ -221,10 +288,13 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         if (!schema) {
             return;
         }
-        const service = this.accessory.getService(SCHEMA_CODE[i].NAME) ||
-            this.accessory.addService(this.Service.WindowCovering, SCHEMA_CODE[i].NAME, SCHEMA_CODE[i].NAME);
+        const service = this.getServiceForIndex(i);
         service.getCharacteristic(this.Characteristic.TargetPosition)
             .onGet(() => {
+            const externalTarget = this.getExternalMovementTarget(i);
+            if (externalTarget !== undefined) {
+                return externalTarget;
+            }
             const status = this.getStatus(schema.code);
             return this.rawPositionToHomeKit(status?.value, i);
         })
@@ -233,6 +303,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 this.targetPosition = {};
             }
             this.targetPosition[i] = this.toLimitedPosition(value);
+            this.clearExternalMovementTarget(i);
             this.clearExternalMovementTimer(i);
             await this.sendCommands([{ code: schema.code, value: this.homeKitPositionToRaw(value, i) }], true);
         });
@@ -244,10 +315,13 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         }
         const range = Array.isArray(schema.property?.range) ? schema.property.range.map((item) => String(item).toLowerCase()) : [];
         const isOldSchema = range.length > 0 && !range.includes('open');
-        const service = this.accessory.getService(SCHEMA_CODE[i].NAME) ||
-            this.accessory.addService(this.Service.WindowCovering, SCHEMA_CODE[i].NAME, SCHEMA_CODE[i].NAME);
+        const service = this.getServiceForIndex(i);
         service.getCharacteristic(this.Characteristic.TargetPosition)
             .onGet(() => {
+            const externalTarget = this.getExternalMovementTarget(i);
+            if (externalTarget !== undefined) {
+                return externalTarget;
+            }
             const status = this.getStatus(schema.code);
             return this.getControlPosition(status?.value, i);
         })
@@ -256,6 +330,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 this.targetPosition = {};
             }
             this.targetPosition[i] = this.toLimitedPosition(value);
+            this.clearExternalMovementTarget(i);
             this.clearExternalMovementTimer(i);
             const control = this.getControlCommand(value, i, isOldSchema);
             await this.sendCommands([{ code: schema.code, value: control }], true);
@@ -328,6 +403,25 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
         const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
         const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
+        const externalTarget = this.getExternalMovementTarget(i);
+        if (externalTarget !== undefined) {
+            const rawTarget = this.homeKitPositionToRaw(externalTarget, i);
+            if (targetSchema) {
+                this.setStatusValue(targetSchema.code, rawTarget);
+            }
+            if (currentSchema) {
+                this.setStatusValue(currentSchema.code, rawTarget);
+            }
+            if (controlSchema) {
+                const controlStatus = this.getStatus(controlSchema.code);
+                if (this.isControlMoving(controlStatus?.value)) {
+                    this.setStatusValue(controlSchema.code, this.getStopCommandForControlSchema(controlSchema));
+                }
+            }
+            this.clearExternalMovementTarget(i);
+            await this.updateAllValues();
+            return;
+        }
         if (controlSchema) {
             const controlStatus = this.getStatus(controlSchema.code);
             if (this.isControlStopped(controlStatus?.value)) {
@@ -374,6 +468,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             const controlUpdate = controlSchema ? this.getStatusUpdate(status, controlSchema.code) : undefined;
             if (controlUpdate && this.isControlStopped(controlUpdate.value)) {
                 this.clearExternalMovementTimer(i);
+                this.clearExternalMovementTarget(i);
                 await this.updateAllValues();
                 continue;
             }
@@ -381,8 +476,13 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 this.clearExternalMovementTimer(i);
                 continue;
             }
-            if ((controlUpdate && this.isControlMoving(controlUpdate.value)) || targetUpdate || currentUpdate) {
-                this.scheduleExternalMovementSettle(i, controlUpdate ? `${controlSchema?.code}=${controlUpdate.value}` : 'position update');
+            if (controlUpdate && this.isControlMoving(controlUpdate.value)) {
+                this.setExternalMovementTarget(i, this.getControlPosition(controlUpdate.value, i));
+                this.scheduleExternalMovementSettle(i, `${controlSchema?.code}=${controlUpdate.value}`);
+                continue;
+            }
+            if (targetUpdate || currentUpdate) {
+                this.scheduleExternalMovementSettle(i, 'position update');
             }
         }
     }
