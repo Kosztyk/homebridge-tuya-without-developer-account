@@ -43,6 +43,14 @@ class BlindsAccessory extends BaseAccessory_1.default {
             }
             return false;
         };
+        const firstBooleanDefault = (defaultValue, ...values) => {
+            for (const value of values) {
+                if (typeof value === 'boolean') {
+                    return value;
+                }
+            }
+            return defaultValue;
+        };
         const firstNumber = (...values) => {
             for (const value of values) {
                 const number = Number(value);
@@ -56,6 +64,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
             invertPosition: firstBoolean(channelConfig?.invertPosition, windowCovering?.invertPosition, deviceConfig?.invertPosition),
             reverseControl: firstBoolean(channelConfig?.reverseControl, windowCovering?.reverseControl, deviceConfig?.reverseControl, deviceConfig?.reverse),
             settleSeconds: (0, util_1.limit)(firstNumber(channelConfig?.settleSeconds, windowCovering?.settleSeconds, deviceConfig?.settleSeconds), 5, 180),
+            trustExternalControlState: firstBooleanDefault(true, channelConfig?.trustExternalControlState, windowCovering?.trustExternalControlState, deviceConfig?.trustExternalControlState),
         };
     }
     toLimitedPosition(value, fallback = 50) {
@@ -101,8 +110,9 @@ class BlindsAccessory extends BaseAccessory_1.default {
         }
         return this.targetPosition ?? 50;
     }
-    setExternalMovementTarget(targetPosition) {
+    setExternalMovementTarget(targetPosition, options = {}) {
         this.externalMovementTarget = this.toLimitedPosition(targetPosition);
+        this.externalMovementForceFinalState = !!options.forceFinalState;
         this.targetPosition = this.externalMovementTarget;
         const service = this.getService();
         service.updateCharacteristic(this.Characteristic.TargetPosition, this.externalMovementTarget);
@@ -110,6 +120,26 @@ class BlindsAccessory extends BaseAccessory_1.default {
     }
     clearExternalMovementTarget() {
         this.externalMovementTarget = undefined;
+        this.externalMovementForceFinalState = false;
+    }
+    markHomeKitCommandEchoWindow() {
+        this.homeKitCommandEchoUntil = Date.now() + 5000;
+    }
+    isWithinHomeKitCommandEchoWindow() {
+        return Date.now() < (this.homeKitCommandEchoUntil ?? 0);
+    }
+    controlValueToSemanticPosition(value) {
+        const lowerValue = String(value ?? '').toLowerCase();
+        if (lowerValue === 'open' || lowerValue === 'zz') {
+            return 100;
+        }
+        if (lowerValue === 'close' || lowerValue === 'fz') {
+            return 0;
+        }
+        if (lowerValue === 'stop' || lowerValue === 'stopped') {
+            return this.targetPosition ?? this.getCurrentHomeKitPosition();
+        }
+        return undefined;
     }
     scheduleStartupMovementReconcile() {
         if (this.startupMovementTimer) {
@@ -120,7 +150,8 @@ class BlindsAccessory extends BaseAccessory_1.default {
             const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
             const controlStatus = controlSchema ? this.getStatus(controlSchema.code) : undefined;
             if (controlSchema && this.isControlMoving(controlStatus?.value)) {
-                this.setExternalMovementTarget(this.controlValueToPosition(controlStatus?.value));
+                const semanticTarget = this.controlValueToSemanticPosition(controlStatus?.value);
+                this.setExternalMovementTarget(semanticTarget ?? this.controlValueToPosition(controlStatus?.value), { forceFinalState: semanticTarget !== undefined });
                 this.scheduleExternalMovementSettle(`startup ${controlSchema.code}=${controlStatus?.value}`);
                 return;
             }
@@ -184,9 +215,20 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.getSchema(...SCHEMA_CODE.POSITION);
         const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
         const { DECREASING, INCREASING, STOPPED } = this.Characteristic.PositionState;
-        // Prefer actual/target percentage DPs over open/close command DPs. Tuya
-        // calibration can make the command string look reversed, but the position
-        // values are what HomeKit ultimately needs.
+        // If movement was initiated outside HomeKit from the Tuya app, the
+        // open/close command text is the user's semantic intent. Keep HomeKit
+        // direction/final state aligned to that command even when Tuya's numeric
+        // percent DPs are calibrated with the opposite 0/100 meaning.
+        if (this.externalMovementTarget !== undefined) {
+            const currentPosition = this.getCurrentHomeKitPosition();
+            if (Math.abs(this.externalMovementTarget - currentPosition) > 1) {
+                return this.externalMovementTarget > currentPosition ? INCREASING : DECREASING;
+            }
+            return STOPPED;
+        }
+        // Prefer actual/target percentage DPs over open/close command DPs for
+        // normal steady-state reads. Tuya calibration can make command strings
+        // look reversed, but percentage values usually carry the real position.
         if (currentSchema && targetSchema) {
             const currentStatus = this.getStatus(currentSchema.code);
             const targetStatus = this.getStatus(targetSchema.code);
@@ -261,6 +303,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
             .onSet(async (value) => {
             const targetPos = this.toLimitedPosition(value);
             this.targetPosition = targetPos;
+            this.markHomeKitCommandEchoWindow();
             this.clearExternalMovementTarget();
             this.clearExternalMovementTimer();
             // Clear any pending reset timer
@@ -389,11 +432,11 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.getSchema(...SCHEMA_CODE.POSITION);
         const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_POSITION);
         if (this.externalMovementTarget !== undefined) {
-            // Only force a guessed final target for control-only motors. If Tuya
-            // exposes any percentage position DP, the guessed command target can be
-            // wrong under reversed Tuya calibration, so keep the refreshed position
-            // values and only mark the command as stopped.
-            if (!targetSchema && !currentSchema) {
+            // For Tuya-app open/close commands, the command text is more reliable
+            // than the raw numeric target on several calibrated motors. Force the
+            // local HomeKit current/target to the semantic command endpoint at
+            // settle time so Apple Home does not end at the opposite state.
+            if (this.externalMovementForceFinalState || (!targetSchema && !currentSchema)) {
                 const rawTarget = this.homeKitPositionToRaw(this.externalMovementTarget);
                 if (targetSchema) {
                     this.setStatusValue(targetSchema.code, rawTarget);
@@ -469,21 +512,27 @@ class BlindsAccessory extends BaseAccessory_1.default {
             await this.updateAllValues();
             return;
         }
-        if (this.isCurrentAtTarget()) {
-            this.clearExternalMovementTimer();
-            return;
-        }
         if (controlUpdate && this.isControlMoving(controlUpdate.value)) {
+            const options = this.getWindowCoveringOptions(controlSchema?.code ?? 'control');
+            const semanticTarget = this.controlValueToSemanticPosition(controlUpdate.value);
+            const isHomeKitEcho = this.isWithinHomeKitCommandEchoWindow();
+            if (!isHomeKitEcho && options.trustExternalControlState && semanticTarget !== undefined) {
+                this.setExternalMovementTarget(semanticTarget, { forceFinalState: true });
+                this.scheduleExternalMovementSettle(`${controlSchema?.code}=${controlUpdate.value}`);
+                await this.updateAllValues();
+                return;
+            }
             if (currentSchema || targetSchema) {
-                // Do not let Tuya open/close command text become authoritative for
-                // calibrated/reversed motors. Position DPs will determine direction
-                // and final state; the settle timer just prevents stale motion.
                 this.scheduleExternalMovementSettle(`${controlSchema?.code}=${controlUpdate.value}`);
                 await this.updateAllValues();
                 return;
             }
             this.setExternalMovementTarget(this.controlValueToPosition(controlUpdate.value));
             this.scheduleExternalMovementSettle(`${controlSchema?.code}=${controlUpdate.value}`);
+            return;
+        }
+        if (this.isCurrentAtTarget()) {
+            this.clearExternalMovementTimer();
             return;
         }
         if (targetUpdate || currentUpdate) {

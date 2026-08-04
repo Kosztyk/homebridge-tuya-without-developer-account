@@ -263,6 +263,12 @@
                       "minimum": 5,
                       "maximum": 180
                     },
+                    "trustExternalControlState": {
+                      "type": "boolean",
+                      "title": "Use Tuya app open/close as final state",
+                      "description": "When enabled, an open/close command triggered from the Tuya app is treated as the semantic HomeKit target. This fixes motors whose Tuya percentage DPs report the opposite state during external app control.",
+                      "default": true
+                    },
                     "channels": {
                       "type": "object",
                       "title": "Per-channel blind options",
@@ -286,6 +292,11 @@
                             "default": 35,
                             "minimum": 5,
                             "maximum": 180
+                          },
+                          "trustExternalControlState": {
+                            "type": "boolean",
+                            "title": "Use Tuya app open/close as final state",
+                            "default": true
                           }
                         }
                       }

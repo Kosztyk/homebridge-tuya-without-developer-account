@@ -541,3 +541,21 @@ For deterministic names, you can still use `deviceOverrides[].switchNames`, for 
   }
 }
 ```
+
+### v1.0.21 Tuya-app blind command handling
+
+For calibrated blind motors, `windowCovering.trustExternalControlState` defaults to `true`. When a blind is opened or closed from the Tuya app, the plugin treats the Tuya `open` / `close` command as the semantic HomeKit target so Apple Home does not show the opposite Opening/Closing direction or final Open/Closed state.
+
+Example:
+
+```json
+{
+  "id": "BLIND_DEVICE_ID",
+  "windowCovering": {
+    "invertPosition": true,
+    "reverseControl": false,
+    "trustExternalControlState": true,
+    "settleSeconds": 35
+  }
+}
+```

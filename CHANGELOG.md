@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.21
+
+- Fixed blinds/window coverings where commands triggered from the Tuya app still appeared reversed in Apple Home.
+- Tuya-app `open` / `close` updates are now treated as semantic external movement targets, independent of the HomeKit reverse-control setting.
+- At settle time, HomeKit current/target position is aligned to the semantic Tuya-app command endpoint when `trustExternalControlState` is enabled.
+- Added optional `deviceOverrides[].windowCovering.trustExternalControlState` and per-channel equivalent; default is `true`.
+
 ## 1.0.20
 
 - Fixed Tuya-app blind/curtain open/close updates being treated as authoritative command targets when percentage position DPs exist.
