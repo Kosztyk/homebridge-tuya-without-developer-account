@@ -61,7 +61,51 @@
                 },
                 "category": {
                   "type": "string",
-                  "title": "Category Override"
+                  "title": "Custom Type / Category Override",
+                  "description": "Optional. Force a device to use a specific Tuya category handler. Use Pet Feeder / cwwsq when Tuya reports a pet feeder with an unsupported or incorrect category.",
+                  "oneOf": [
+                    {
+                      "title": "No override",
+                      "const": ""
+                    },
+                    {
+                      "title": "Pet Feeder",
+                      "const": "cwwsq"
+                    },
+                    {
+                      "title": "Switch",
+                      "const": "kg"
+                    },
+                    {
+                      "title": "Outlet",
+                      "const": "cz"
+                    },
+                    {
+                      "title": "Dimmer Plug",
+                      "const": "tgq"
+                    },
+                    {
+                      "title": "Light",
+                      "const": "dj"
+                    },
+                    {
+                      "title": "Air Conditioner",
+                      "const": "kt"
+                    },
+                    {
+                      "title": "Blind / Curtain",
+                      "const": "cl"
+                    },
+                    {
+                      "title": "Alarm / Security System",
+                      "const": "mal"
+                    },
+                    {
+                      "title": "Camera / Doorbell",
+                      "const": "sp"
+                    }
+                  ],
+                  "default": ""
                 },
                 "unbridged": {
                   "type": "boolean",

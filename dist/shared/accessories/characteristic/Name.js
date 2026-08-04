@@ -23,15 +23,83 @@ function getPreserveHomeKitNames(accessory) {
     }
     return globalSetting;
 }
+function normalizeNameForCompare(name) {
+    return String(name ?? '')
+        .toLowerCase()
+        .replace(/[_\-]+/g, ' ')
+        .replace(/[^\p{L}\p{N}'\s]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+function getSubtypeSuffix(subtype) {
+    const raw = String(subtype ?? '').trim();
+    if (!raw) {
+        return '';
+    }
+    const match = raw.match(/(?:switch|control|scene|relay|outlet|plug|usb)[_\s-]*(\d+|usb\d+)$/i);
+    return match ? String(match[1]).toLowerCase() : '';
+}
+function looksLikePluginGeneratedName(candidate, generatedName, accessory, service) {
+    const safeCandidate = toSafeName(candidate, undefined);
+    if (!safeCandidate) {
+        return true;
+    }
+    const normalized = normalizeNameForCompare(safeCandidate);
+    const generated = normalizeNameForCompare(generatedName);
+    const deviceName = normalizeNameForCompare(accessory?.device?.name || accessory?.accessory?.displayName || '');
+    const subtype = normalizeNameForCompare(service?.subtype || '');
+    const suffix = getSubtypeSuffix(service?.subtype);
+    const generatedWithoutDevice = deviceName && normalized === normalizeNameForCompare(String(safeCandidate).replace(new RegExp(`^${escapeRegExp(deviceName)}\\s+`, 'i'), ''));
+    if (!normalized) {
+        return true;
+    }
+    if (generated && normalized === generated) {
+        return true;
+    }
+    if (subtype && normalized === subtype) {
+        return true;
+    }
+    if (suffix && normalized === suffix) {
+        return true;
+    }
+    if (suffix && normalized === `switch ${suffix}`) {
+        return true;
+    }
+    if (suffix && normalized === `outlet ${suffix}`) {
+        return true;
+    }
+    if (suffix && normalized === `plug ${suffix}`) {
+        return true;
+    }
+    if (suffix && deviceName && normalized === `${deviceName} ${suffix}`) {
+        return true;
+    }
+    if (generatedWithoutDevice) {
+        return true;
+    }
+    return false;
+}
+function escapeRegExp(value) {
+    return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function getServiceDisplayName(service) {
+    const value = service?.displayName;
+    return typeof value === 'string' ? value.trim() : '';
+}
 
 /**
- * Configure a HomeKit service name without overwriting a user-renamed
- * ConfiguredName on every Homebridge restart.
+ * Configure a HomeKit service name without overwriting user-renamed services.
+ *
+ * Homebridge and Apple Home can persist service names in different places:
+ * Service.displayName, Service.Name, or Service.ConfiguredName. Multi-gang
+ * switches/outlets are especially sensitive because Homebridge can show edited
+ * names while Apple Home still sees old generated channel names like 1/2/3.
  *
  * Priority:
  *   1. Explicit override supplied by the plugin configuration.
- *   2. Existing HomeKit ConfiguredName when preservation is enabled.
- *   3. Plugin-generated default name.
+ *   2. Existing non-generated ConfiguredName / Name / displayName.
+ *   3. Existing displayName even when ConfiguredName only contains 1/2/3.
+ *   4. Plugin-generated default name.
  */
 function configureName(accessory, service, name, options = {}) {
     const explicitOverride = typeof options.overrideName === 'string' && options.overrideName.trim()
@@ -54,24 +122,37 @@ function configureName(accessory, service, name, options = {}) {
             }
         }
         catch (_error) {
-            // Ignore malformed cached values and fall back to the generated name.
+            // Ignore malformed cached values and fall back below.
         }
         return '';
     };
     const currentConfiguredName = getCurrentValue(accessory.Characteristic.ConfiguredName);
     const currentName = getCurrentValue(accessory.Characteristic.Name);
+    const displayName = getServiceDisplayName(service);
 
     let targetName;
     if (forcedName) {
         targetName = forcedName;
     }
     else if (preserveExisting) {
-        // Apple Home/Homebridge may persist a user rename either as
-        // ConfiguredName or as Name depending on platform/version and service
-        // type. Preserve either valid value rather than replacing it on start.
-        targetName = toSafeName(currentConfiguredName, undefined)
-            || toSafeName(currentName, undefined)
-            || generatedName;
+        const candidates = [currentConfiguredName, currentName, displayName];
+        for (const candidate of candidates) {
+            const safe = toSafeName(candidate, undefined);
+            if (safe && !looksLikePluginGeneratedName(safe, generatedName, accessory, service)) {
+                targetName = safe;
+                break;
+            }
+        }
+        // If HomeKit characteristics only have generated values like 1/2/3 but
+        // Homebridge's cached service displayName was edited by the user, use it
+        // as the authoritative service name and write it back to HomeKit.
+        if (!targetName) {
+            const safeDisplayName = toSafeName(displayName, undefined);
+            if (safeDisplayName && displayName !== generatedName) {
+                targetName = safeDisplayName;
+            }
+        }
+        targetName = targetName || generatedName;
     }
     else {
         targetName = generatedName;

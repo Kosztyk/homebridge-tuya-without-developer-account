@@ -177,6 +177,68 @@
 </div>
 
 <div class="tuya-nodev-card">
+  <div class="tuya-nodev-title">Pet Feeder / Custom Type Overrides</div>
+  <p class="tuya-nodev-small mb-3">
+    Force a detected Tuya device to use the <strong>Pet Feeder</strong> handler when Tuya reports the wrong category or the device is not auto-detected. This writes <code>category: "cwwsq"</code> and enables the Valve-style Feed Now control.
+  </p>
+
+  <div class="form-group">
+    <label for="tuyaNodevPetDevice">Select device</label>
+    <select id="tuyaNodevPetDevice" class="form-control">
+      <option value="">Load devices first...</option>
+    </select>
+    <small class="form-text text-muted">Pet-feeder-looking devices are listed first, but any device can be selected and forced to Pet Feeder.</small>
+  </div>
+
+  <div class="tuya-nodev-grid">
+    <div class="form-group">
+      <label for="tuyaNodevPetManualAmount">Manual feed amount</label>
+      <input id="tuyaNodevPetManualAmount" class="form-control" type="number" min="1" max="12" step="1" value="1">
+      <small class="form-text text-muted">Portions sent when the HomeKit Feed Now / Valve control is activated.</small>
+    </div>
+    <div class="form-group">
+      <label>Custom Type</label>
+      <input class="form-control" type="text" value="Pet Feeder (cwwsq)" readonly>
+      <small class="form-text text-muted">This is saved as the Tuya category override <code>cwwsq</code>.</small>
+    </div>
+  </div>
+
+  <div class="form-check mb-2">
+    <input id="tuyaNodevPetExposeSlow" class="form-check-input" type="checkbox" checked>
+    <label class="form-check-label" for="tuyaNodevPetExposeSlow">Expose Slow Feed switch</label>
+    <small class="form-text text-muted">Only appears in HomeKit when the Tuya device exposes the <code>slow_feed</code> DP.</small>
+  </div>
+
+  <div class="tuya-nodev-actions">
+    <button id="tuyaNodevLoadPetDevices" class="btn btn-outline-primary" type="button">Load Detected Devices</button>
+    <button id="tuyaNodevApplyPet" class="btn btn-primary" type="button">Add / Update Pet Feeder Override</button>
+    <button id="tuyaNodevRemovePet" class="btn btn-outline-danger" type="button">Remove Selected Pet Feeder Override</button>
+  </div>
+
+  <div id="tuyaNodevPetStatus" class="tuya-nodev-ac-status alert alert-secondary">
+    Load detected devices after the plugin has authenticated and discovered your Tuya devices at least once.
+  </div>
+
+  <div class="tuya-nodev-table-wrap">
+    <table class="tuya-nodev-table">
+      <thead>
+        <tr>
+          <th>Device</th>
+          <th>Device ID</th>
+          <th>Custom Type</th>
+          <th>Manual amount</th>
+          <th>Slow Feed</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tuyaNodevPetOverrideRows">
+        <tr><td colspan="6" class="tuya-nodev-small">No pet-feeder custom type overrides configured.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="tuya-nodev-card">
   <div class="tuya-nodev-title">Blind / Window Covering Overrides</div>
   <p class="tuya-nodev-small mb-3">
     Fix Tuya blind calibration mismatches. HomeKit expects <strong>0 = closed</strong> and <strong>100 = open</strong>. Some Tuya motors report the opposite, or have open/close movement commands reversed.
@@ -325,6 +387,13 @@
     el.textContent = message;
   }
 
+  function setPetFeederStatus(message, type = 'secondary') {
+    const el = $('tuyaNodevPetStatus');
+    if (!el) return;
+    el.className = `tuya-nodev-ac-status alert alert-${type}`;
+    el.textContent = message;
+  }
+
   function firstNonEmpty(...values) {
     for (const value of values) {
       if (value === undefined || value === null) {
@@ -404,6 +473,7 @@
     await homebridge.updatePluginConfig([currentConfig]);
     renderAcOverrides();
     renderSwitchNameOverrides();
+    renderPetFeederOverrides();
     renderCoverOverrides();
   }
 
@@ -458,6 +528,157 @@
     return device?.likelyWindowCovering === true
       || ['cl', 'clkg', 'mg', 'mgmt'].includes(category)
       || ['control', 'control_2', 'mach_operate', 'percent_state', 'percent_control', 'percent_control_2', 'position'].some((code) => codes.includes(code));
+  }
+
+  function isPetFeederDevice(device) {
+    const category = String(device?.category || '').toLowerCase();
+    const haystack = [
+      device?.name,
+      device?.category,
+      device?.productName,
+      device?.productId,
+      device?.model,
+    ].filter(Boolean).join(' ').toLowerCase();
+    const codes = Array.from(new Set([
+      ...(Array.isArray(device?.schemaCodes) ? device.schemaCodes : []),
+      ...(Array.isArray(device?.statusCodes) ? device.statusCodes : []),
+    ].map((code) => String(code || '').trim()).filter(Boolean)));
+    return device?.likelyPetFeeder === true
+      || category === 'cwwsq'
+      || ['quick_feed', 'manual_feed', 'slow_feed', 'meal_plan', 'feed_state'].some((code) => codes.includes(code))
+      || ['pet feeder', 'feeder', 'cat feeder', 'dog feeder', 'food dispenser'].some((needle) => haystack.includes(needle));
+  }
+
+  function getPetFeederOverrides() {
+    const cfg = ensureConfig();
+    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id && (String(item.category || '').toLowerCase() === 'cwwsq' || (item.petFeeder && typeof item.petFeeder === 'object' && !Array.isArray(item.petFeeder))));
+  }
+
+  function isOnlyPetFeederOverride(item) {
+    const keys = Object.keys(item || {}).filter((key) => item[key] !== undefined && item[key] !== null && item[key] !== '');
+    return keys.every((key) => ['id', 'category', 'petFeeder'].includes(key));
+  }
+
+  function populatePetFeederDeviceSelect(devices) {
+    const select = $('tuyaNodevPetDevice');
+    if (!select) return;
+    const current = select.value;
+    if (!devices.length) {
+      select.innerHTML = '<option value="">No detected devices found</option>';
+      return;
+    }
+    const sorted = [...devices].sort((a, b) => {
+      const aPet = isPetFeederDevice(a);
+      const bPet = isPetFeederDevice(b);
+      if (aPet !== bPet) return aPet ? -1 : 1;
+      return String(a.name).localeCompare(String(b.name));
+    });
+    select.innerHTML = '<option value="">Select a Tuya device...</option>' + sorted.map((device) => {
+      const tag = isPetFeederDevice(device) ? 'pet feeder candidate' : (device.category || 'device');
+      const text = `${device.name} — ${tag} — ${device.id}`;
+      return `<option value="${escapeHtml(device.id)}">${escapeHtml(text)}</option>`;
+    }).join('');
+    if (current && sorted.some((device) => device.id === current)) {
+      select.value = current;
+    }
+  }
+
+  function renderPetFeederOverrides() {
+    const tbody = $('tuyaNodevPetOverrideRows');
+    if (!tbody) return;
+    const overrides = getPetFeederOverrides();
+    if (!overrides.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="tuya-nodev-small">No pet-feeder custom type overrides configured.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = overrides.map((override) => {
+      const pet = override.petFeeder || {};
+      const name = getDeviceName(override.id) || 'Unknown / not in detected cache';
+      return `
+        <tr>
+          <td>${escapeHtml(name)}</td>
+          <td><code>${escapeHtml(override.id)}</code></td>
+          <td><code>${escapeHtml(override.category || 'cwwsq')}</code></td>
+          <td>${escapeHtml(pet.manualFeedAmount ?? 1)}</td>
+          <td>${pet.exposeSlowFeed === false ? 'No' : 'Yes'}</td>
+          <td><button class="btn btn-sm btn-outline-secondary tuya-nodev-edit-pet" type="button" data-id="${escapeHtml(override.id)}">Edit</button></td>
+        </tr>`;
+    }).join('');
+    tbody.querySelectorAll('.tuya-nodev-edit-pet').forEach((button) => {
+      button.addEventListener('click', () => editPetFeederOverride(button.getAttribute('data-id')));
+    });
+  }
+
+  function editPetFeederOverride(id) {
+    const override = getPetFeederOverrides().find((item) => item.id === id);
+    if (!override) return;
+    const device = detectedDevices.find((item) => item.id === id);
+    const select = $('tuyaNodevPetDevice');
+    if (!detectedDevices.some((item) => item.id === id)) {
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = `${id} — not currently in detected device cache`;
+      select.appendChild(option);
+    }
+    select.value = id;
+    $('tuyaNodevPetManualAmount').value = override.petFeeder?.manualFeedAmount ?? 1;
+    $('tuyaNodevPetExposeSlow').checked = override.petFeeder?.exposeSlowFeed !== false;
+    setPetFeederStatus(`Editing Pet Feeder custom type override for ${device?.name || id}.`, 'info');
+    select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function addOrUpdatePetFeederOverride() {
+    try {
+      const id = $('tuyaNodevPetDevice')?.value || '';
+      if (!id) {
+        setPetFeederStatus('Select a Tuya device first.', 'warning');
+        return;
+      }
+      const manualFeedAmount = Math.max(1, Math.min(12, Math.round(parseNumberInput('tuyaNodevPetManualAmount', 'Manual feed amount'))));
+      const exposeSlowFeed = $('tuyaNodevPetExposeSlow')?.checked !== false;
+      const override = ensureDeviceOverride(id);
+      override.category = 'cwwsq';
+      override.petFeeder = { manualFeedAmount, exposeSlowFeed };
+      await syncConfigToUi();
+      const name = getDeviceName(id) || id;
+      setPetFeederStatus(`Pet Feeder custom type saved for ${name}. Click Save Configuration, then restart Homebridge.`, 'success');
+      homebridge.toast.success('Pet Feeder custom type override added to config.', 'Tuya');
+      markDirty();
+    } catch (e) {
+      setPetFeederStatus(e.message || 'Failed to add Pet Feeder override.', 'danger');
+    }
+  }
+
+  async function removeSelectedPetFeederOverride() {
+    const id = $('tuyaNodevPetDevice')?.value || '';
+    if (!id) {
+      setPetFeederStatus('Select a Tuya device first.', 'warning');
+      return;
+    }
+    const cfg = ensureConfig();
+    const before = cfg.options.deviceOverrides.length;
+    cfg.options.deviceOverrides = cfg.options.deviceOverrides.flatMap((item) => {
+      if (!item || String(item.id || '').trim() !== id) {
+        return [item];
+      }
+      if (isOnlyPetFeederOverride(item)) {
+        return [];
+      }
+      const copy = clone(item);
+      delete copy.petFeeder;
+      if (String(copy.category || '').toLowerCase() === 'cwwsq') {
+        delete copy.category;
+      }
+      return [copy];
+    });
+    await syncConfigToUi();
+    if (cfg.options.deviceOverrides.length === before) {
+      setPetFeederStatus('No Pet Feeder override existed for the selected device.', 'warning');
+    } else {
+      setPetFeederStatus('Selected Pet Feeder custom type override removed. Click Save Configuration when ready.', 'success');
+      homebridge.toast.success('Pet Feeder override removed from config.', 'Tuya');
+    }
+    markDirty();
   }
 
   function getCoverOverrides() {
@@ -826,6 +1047,7 @@
     if (!devices.length) {
       select.innerHTML = '<option value="">No detected devices found</option>';
       populateSwitchDeviceSelect(devices);
+      populatePetFeederDeviceSelect(devices);
       populateCoverDeviceSelect(devices);
       return;
     }
@@ -840,6 +1062,7 @@
       select.value = current;
     }
     populateSwitchDeviceSelect(devices);
+    populatePetFeederDeviceSelect(devices);
     populateCoverDeviceSelect(devices);
   }
 
@@ -850,10 +1073,14 @@
       detectedDevices = Array.isArray(res.devices) ? res.devices : [];
       populateDeviceSelect(detectedDevices);
       renderAcOverrides();
+      renderSwitchNameOverrides();
+      renderPetFeederOverrides();
       renderCoverOverrides();
       const acCount = detectedDevices.filter((device) => device.likelyAirConditioner).length;
       const coverCount = detectedDevices.filter(isWindowCoveringDevice).length;
+      const petCount = detectedDevices.filter(isPetFeederDevice).length;
       setAcStatus(`${res.message || 'Device list loaded.'} ${acCount ? `${acCount} AC candidate(s) listed first.` : ''}`.trim(), detectedDevices.length ? 'success' : 'warning');
+      setPetFeederStatus(`${res.message || 'Device list loaded.'} ${petCount ? `${petCount} pet feeder candidate(s) found.` : 'Select any device to force it to Pet Feeder.'}`.trim(), detectedDevices.length ? 'success' : 'warning');
       setCoverStatus(`${res.message || 'Device list loaded.'} ${coverCount ? `${coverCount} blind/curtain candidate(s) found.` : ''}`.trim(), detectedDevices.length ? 'success' : 'warning');
       if (showToast) homebridge.toast.success(`Loaded ${detectedDevices.length} detected Tuya device(s).`, 'Tuya');
     } catch (e) {
@@ -1238,6 +1465,7 @@
           renderAcOverrides();
           renderSwitchNameOverrides();
           renderSwitchChannelEditor();
+          renderPetFeederOverrides();
           renderCoverOverrides();
         }
       });
@@ -1270,6 +1498,14 @@
       $('tuyaNodevRemoveAc').addEventListener('click', removeSelectedAcOverride);
       $('tuyaNodevLoadSwitchDevices').addEventListener('click', () => loadDetectedDevices(true));
       $('tuyaNodevSwitchDevice').addEventListener('change', renderSwitchChannelEditor);
+      $('tuyaNodevLoadPetDevices').addEventListener('click', () => loadDetectedDevices(true));
+      $('tuyaNodevPetDevice').addEventListener('change', () => {
+        const override = getPetFeederOverrides().find((item) => item.id === ($('tuyaNodevPetDevice').value || ''));
+        $('tuyaNodevPetManualAmount').value = override?.petFeeder?.manualFeedAmount ?? 1;
+        $('tuyaNodevPetExposeSlow').checked = override?.petFeeder?.exposeSlowFeed !== false;
+      });
+      $('tuyaNodevApplyPet').addEventListener('click', addOrUpdatePetFeederOverride);
+      $('tuyaNodevRemovePet').addEventListener('click', removeSelectedPetFeederOverride);
       $('tuyaNodevCoverDevice').addEventListener('change', () => {
         const override = findDeviceOverride($('tuyaNodevCoverDevice').value || '');
         $('tuyaNodevCoverInvert').checked = override?.windowCovering?.invertPosition === true;

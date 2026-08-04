@@ -224,6 +224,8 @@ Supported when Tuya exposes one or more of: `quick_feed`, `manual_feed`, `slow_f
 
 From v1.0.13 the feeder uses a refined HomeKit `Valve` service as the main **Feed Now** control. Activating it sends the configured `manual_feed` amount when available, or falls back to `quick_feed`. `InUse` reflects `feed_state`. The plugin also keeps the Quick Feed switch, optional Slow Feed switch, Feeding occupancy/status sensor, and Battery service.
 
+From v1.0.18, the custom Homebridge UI includes **Pet Feeder / Custom Type Overrides**. Use it when Tuya reports a feeder with the wrong category, or when the device does not auto-detect as `cwwsq`. The override writes `category: "cwwsq"` and optional `petFeeder.manualFeedAmount` / `petFeeder.exposeSlowFeed` settings.
+
 ### Alarm / Security System
 
 Supported when Tuya exposes `master_mode`. Alarm-triggered state is detected from `master_state=alarm`, `sos_state=true`, or `master_mode=sos` when available. Optional extra switches can be enabled through `deviceOverrides[].alarm`.

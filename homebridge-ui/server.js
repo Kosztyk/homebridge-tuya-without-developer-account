@@ -75,6 +75,26 @@ function looksLikeWindowCovering(device) {
     || ['cl', 'clkg', 'mg', 'mgmt'].includes(String(device.category || '').toLowerCase());
 }
 
+function looksLikePetFeeder(device) {
+  const haystack = [
+    device.name,
+    device.category,
+    device.productName,
+    device.productId,
+    device.model,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return [
+    'pet feeder',
+    'feeder',
+    'cat feeder',
+    'dog feeder',
+    'food dispenser',
+    'cwwsq',
+  ].some((needle) => haystack.includes(needle))
+    || ['cwwsq'].includes(String(device.category || '').toLowerCase());
+}
+
 function collectDevicesFromObject(root) {
   const byId = new Map();
 
@@ -160,6 +180,8 @@ function collectDevicesFromObject(root) {
       || merged.schemaCodes.includes('temp_set');
     merged.likelyWindowCovering = looksLikeWindowCovering(merged)
       || ['control', 'mach_operate', 'percent_state', 'percent_control', 'position', 'control_2', 'percent_control_2'].some((code) => merged.statusCodes.includes(code) || merged.schemaCodes.includes(code));
+    merged.likelyPetFeeder = looksLikePetFeeder(merged)
+      || ['quick_feed', 'manual_feed', 'slow_feed', 'meal_plan', 'feed_state'].some((code) => merged.statusCodes.includes(code) || merged.schemaCodes.includes(code));
     merged.label = `${merged.name} (${merged.id})`;
     byId.set(id, merged);
   }

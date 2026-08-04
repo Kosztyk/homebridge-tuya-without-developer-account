@@ -1,4 +1,20 @@
 # Changelog
+
+## 1.0.19
+
+- Fixed HomeKit service names for multi-gang switches/outlets not being restored from Homebridge cached display names.
+- Name preservation now works generically for any renamed multi-service accessory, not only a specific Bathroom device.
+- Service naming now skips stale plugin-generated channel names like `1`, `2`, `3`, `switch_1`, or `Device 1` when a better user-edited cached display name exists.
+- Switch and outlet services are now reused by HomeKit service subtype via `getServiceById(...)`, reducing accidental service recreation after channel renames.
+
+## 1.0.18
+
+- Added a Homebridge custom UI section for **Pet Feeder / Custom Type Overrides**.
+- The UI can now force any detected Tuya device to use the Pet Feeder handler by writing `category: "cwwsq"`.
+- Pet Feeder overrides also expose `manualFeedAmount` and `exposeSlowFeed` controls without manually editing `config.json`.
+- Added `Pet Feeder` to the category override schema as a visible custom type.
+- The device-cache helper now marks likely pet feeder candidates when it sees category `cwwsq` or DPs such as `quick_feed`, `manual_feed`, `slow_feed`, `meal_plan`, or `feed_state`.
+
 ## 1.0.17
 
 - Fixed external Tuya-app blind/curtain open/close updates being interpreted with the wrong direction when invert/reverse calibration is enabled.

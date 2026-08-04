@@ -243,6 +243,42 @@ Explicit switchNames override
 
 Set `deviceOverrides[].preserveHomeKitNames` to `false` for a specific device when you want the plugin to reapply generated names at every restart.
 
+### Pet Feeder custom type override
+
+Version 1.0.18 adds a dedicated custom UI section named **Pet Feeder / Custom Type Overrides**. Use this when Tuya reports a pet feeder with the wrong category, or when the feeder is not auto-detected as `cwwsq`.
+
+Preferred method:
+
+1. Authenticate and let the plugin discover devices at least once.
+2. Open **Plugins → Tuya without developer account for Homebridge → Settings**.
+3. In **Pet Feeder / Custom Type Overrides**, click **Load Detected Devices**.
+4. Select the Tuya device to force as a pet feeder.
+5. Set the manual feed amount and whether to expose the Slow Feed switch.
+6. Click **Add / Update Pet Feeder Override**.
+7. Click **Save Configuration** and restart Homebridge.
+
+Equivalent manual config:
+
+```json
+{
+  "options": {
+    "userCode": "YOUR_TUYA_USER_CODE",
+    "deviceOverrides": [
+      {
+        "id": "YOUR_FEEDER_DEVICE_ID",
+        "category": "cwwsq",
+        "petFeeder": {
+          "manualFeedAmount": 1,
+          "exposeSlowFeed": true
+        }
+      }
+    ]
+  }
+}
+```
+
+`category: "cwwsq"` is the Tuya custom type used by the plugin to select the Smart Pet Feeder accessory handler.
+
 ### Blind / window-covering calibration fixes
 
 Version 1.0.15 added separate correction options for Tuya blinds, curtains, and window coverings whose calibration does not match HomeKit. Version 1.0.16 also fixes blinds getting stuck as Opening/Closing in Apple Home after commands are triggered from the Tuya app by refreshing and settling the state after external movement.
@@ -488,3 +524,20 @@ Version **1.0.5** adds support for DP10-style Tuya dimmer plugs that expose `swi
 This release adds native support for Tuya Smart Pet Feeders and Tuya alarm panels that expose `master_mode`. Pet feeders expose a refined HomeKit Valve-style **Feed Now** control, Quick Feed switch, optional Slow Feed switch, feed-state sensor, and battery when available. Alarm panels are exposed as HomeKit Security System accessories, with optional extra switches controlled through `deviceOverrides[].alarm`.
 
 Aroma diffuser devices whose Tuya QR cloud schema is empty remain visible as unsupported direct devices, but any diffuser scenes returned by Tuya are still exposed separately.
+
+### HomeKit name preservation for multi-gang switches/outlets
+
+Version 1.0.19 improves name preservation for any multi-service switch or outlet device. If Homebridge shows user-edited channel names, such as `Bathroom Ceiling`, `Bathroom Vent`, and `Bathroom Mirror`, but Apple Home still shows generated names such as `1`, `2`, and `3`, restart once after upgrading. The plugin now treats edited Homebridge cached service display names as authoritative and writes them back to HomeKit `Name` and `ConfiguredName`.
+
+For deterministic names, you can still use `deviceOverrides[].switchNames`, for example:
+
+```json
+{
+  "id": "DEVICE_ID",
+  "switchNames": {
+    "switch_1": "Bathroom Ceiling",
+    "switch_2": "Bathroom Vent",
+    "switch_3": "Bathroom Mirror"
+  }
+}
+```

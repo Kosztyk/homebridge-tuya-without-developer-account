@@ -126,7 +126,8 @@ class SwitchAccessory extends BaseAccessory_1.default {
         return typeof value === 'string' && value.trim() ? value.trim() : undefined;
     }
     configureSwitch(schema, name) {
-        const service = this.accessory.getService(schema.code)
+        const service = this.accessory.getServiceById(this.mainService(), schema.code)
+            || this.accessory.getService(schema.code)
             || this.accessory.addService(this.mainService(), name, schema.code);
         (0, Name_1.configureName)(this, service, name, { overrideName: this.getSwitchNameOverride(schema.code) });
         (0, On_1.configureOn)(this, service, schema);

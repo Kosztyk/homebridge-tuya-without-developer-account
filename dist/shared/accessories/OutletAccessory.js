@@ -14,7 +14,8 @@ class OutletAccessory extends SwitchAccessory_1.default {
     }
     configureSwitch(schema, name) {
         super.configureSwitch(schema, name);
-        const service = this.accessory.getService(schema.code)
+        const service = this.accessory.getServiceById(this.mainService(), schema.code)
+            || this.accessory.getService(schema.code)
             || this.accessory.addService(this.mainService(), name, schema.code);
         (0, OutletInUse_1.configureOutletInUse)(this, service, this.getSchema(...SCHEMA_CODE.CURRENT));
     }
