@@ -108,6 +108,7 @@ function configureName(accessory, service, name, options = {}) {
     const generatedName = toSafeName(name);
     const forcedName = explicitOverride ? toSafeName(explicitOverride, generatedName) : undefined;
     const preserveExisting = options.preserveExisting ?? getPreserveHomeKitNames(accessory);
+    const subtypeKey = String(service?.subtype || service?.displayName || generatedName);
 
     const hadConfiguredName = service.testCharacteristic(accessory.Characteristic.ConfiguredName);
     if (!hadConfiguredName) {
@@ -129,26 +130,33 @@ function configureName(accessory, service, name, options = {}) {
     const currentConfiguredName = getCurrentValue(accessory.Characteristic.ConfiguredName);
     const currentName = getCurrentValue(accessory.Characteristic.Name);
     const displayName = getServiceDisplayName(service);
+    const contextNames = accessory.accessory.context.homeKitServiceNames && typeof accessory.accessory.context.homeKitServiceNames === 'object'
+        ? accessory.accessory.context.homeKitServiceNames
+        : {};
+    accessory.accessory.context.homeKitServiceNames = contextNames;
 
     let targetName;
     if (forcedName) {
         targetName = forcedName;
     }
     else if (preserveExisting) {
-        const candidates = [currentConfiguredName, currentName, displayName];
-        for (const candidate of candidates) {
+        // Prefer the Homebridge cached service display name. The Accessories page
+        // can show a user-edited displayName while the HAP Name/ConfiguredName
+        // characteristics still contain stale generated values such as 1/2/3.
+        const orderedCandidates = [displayName, contextNames[subtypeKey], currentConfiguredName, currentName];
+        for (const candidate of orderedCandidates) {
             const safe = toSafeName(candidate, undefined);
             if (safe && !looksLikePluginGeneratedName(safe, generatedName, accessory, service)) {
                 targetName = safe;
                 break;
             }
         }
-        // If HomeKit characteristics only have generated values like 1/2/3 but
-        // Homebridge's cached service displayName was edited by the user, use it
-        // as the authoritative service name and write it back to HomeKit.
+        // If Homebridge has a service displayName that differs from the generated
+        // default, use it even when it looks like a short/simple name. This is the
+        // generic multi-gang repair path for any room/device, not just Bathroom.
         if (!targetName) {
             const safeDisplayName = toSafeName(displayName, undefined);
-            if (safeDisplayName && displayName !== generatedName) {
+            if (safeDisplayName && normalizeNameForCompare(safeDisplayName) !== normalizeNameForCompare(generatedName)) {
                 targetName = safeDisplayName;
             }
         }
@@ -158,7 +166,14 @@ function configureName(accessory, service, name, options = {}) {
         targetName = generatedName;
     }
 
-    service.updateCharacteristic(accessory.Characteristic.Name, targetName);
+    if (targetName && !looksLikePluginGeneratedName(targetName, generatedName, accessory, service)) {
+        contextNames[subtypeKey] = targetName;
+    }
+    // Keep Homebridge's in-memory displayName aligned too. updateCharacteristic()
+    // alone does not reliably change the card/service name shown by every UI.
+    if (targetName && service.displayName !== targetName) {
+        service.displayName = targetName;
+    }
     service.updateCharacteristic(accessory.Characteristic.ConfiguredName, targetName);
-}
-//# sourceMappingURL=Name.js.map
+    service.updateCharacteristic(accessory.Characteristic.Name, targetName);
+}//# sourceMappingURL=Name.js.map

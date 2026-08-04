@@ -184,6 +184,18 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.getSchema(...SCHEMA_CODE.POSITION);
         const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
         const { DECREASING, INCREASING, STOPPED } = this.Characteristic.PositionState;
+        // Prefer actual/target percentage DPs over open/close command DPs. Tuya
+        // calibration can make the command string look reversed, but the position
+        // values are what HomeKit ultimately needs.
+        if (currentSchema && targetSchema) {
+            const currentStatus = this.getStatus(currentSchema.code);
+            const targetStatus = this.getStatus(targetSchema.code);
+            const currentPos = this.rawPositionToHomeKit(currentStatus?.value);
+            const targetPos = this.rawPositionToHomeKit(targetStatus?.value);
+            if (Math.abs(targetPos - currentPos) > 1) {
+                return targetPos > currentPos ? INCREASING : DECREASING;
+            }
+        }
         if (controlSchema) {
             const controlStatus = this.getStatus(controlSchema.code);
             if (this.isControlStopped(controlStatus?.value)) {
@@ -208,28 +220,9 @@ class BlindsAccessory extends BaseAccessory_1.default {
                 }
             }
         }
-        // If we don't have both current and target, assume stopped
-        if (!currentSchema || !targetSchema) {
-            return STOPPED;
-        }
-        const currentStatus = this.getStatus(currentSchema.code);
-        const targetStatus = this.getStatus(targetSchema.code);
-        const currentPos = this.rawPositionToHomeKit(currentStatus?.value);
-        const targetPos = this.rawPositionToHomeKit(targetStatus?.value);
-        if (targetPos > currentPos) {
-            return INCREASING; // Moving up/open
-        }
-        else if (targetPos < currentPos) {
-            return DECREASING; // Moving down/close
-        }
-        else {
-            return STOPPED; // At target position
-        }
+        return STOPPED;
     }
-    /**
-     * Configure PositionState characteristic.
-     * Indicates if blinds are going up (INCREASING), down (DECREASING), or stopped.
-     */
+
     configurePositionState() {
         const service = this.getService();
         service.getCharacteristic(this.Characteristic.PositionState)
@@ -396,12 +389,18 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.getSchema(...SCHEMA_CODE.POSITION);
         const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_POSITION);
         if (this.externalMovementTarget !== undefined) {
-            const rawTarget = this.homeKitPositionToRaw(this.externalMovementTarget);
-            if (targetSchema) {
-                this.setStatusValue(targetSchema.code, rawTarget);
-            }
-            if (currentSchema) {
-                this.setStatusValue(currentSchema.code, rawTarget);
+            // Only force a guessed final target for control-only motors. If Tuya
+            // exposes any percentage position DP, the guessed command target can be
+            // wrong under reversed Tuya calibration, so keep the refreshed position
+            // values and only mark the command as stopped.
+            if (!targetSchema && !currentSchema) {
+                const rawTarget = this.homeKitPositionToRaw(this.externalMovementTarget);
+                if (targetSchema) {
+                    this.setStatusValue(targetSchema.code, rawTarget);
+                }
+                if (currentSchema) {
+                    this.setStatusValue(currentSchema.code, rawTarget);
+                }
             }
             if (controlSchema) {
                 const controlStatus = this.getStatus(controlSchema.code);
@@ -475,6 +474,14 @@ class BlindsAccessory extends BaseAccessory_1.default {
             return;
         }
         if (controlUpdate && this.isControlMoving(controlUpdate.value)) {
+            if (currentSchema || targetSchema) {
+                // Do not let Tuya open/close command text become authoritative for
+                // calibrated/reversed motors. Position DPs will determine direction
+                // and final state; the settle timer just prevents stale motion.
+                this.scheduleExternalMovementSettle(`${controlSchema?.code}=${controlUpdate.value}`);
+                await this.updateAllValues();
+                return;
+            }
             this.setExternalMovementTarget(this.controlValueToPosition(controlUpdate.value));
             this.scheduleExternalMovementSettle(`${controlSchema?.code}=${controlUpdate.value}`);
             return;

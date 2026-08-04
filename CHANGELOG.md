@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.20
+
+- Fixed Tuya-app blind/curtain open/close updates being treated as authoritative command targets when percentage position DPs exist.
+- PositionState now prefers converted `percent_state` / `percent_control` values over raw `open` / `close` command strings, preventing reversed Tuya calibration from showing the opposite Opening/Closing direction.
+- External movement settling no longer forces a guessed final open/closed position for blinds that expose position DPs; it refreshes from Tuya and only marks movement stopped.
+- Made multi-gang switch/outlet name repair more aggressive and generic by preferring Homebridge cached service display names, storing repaired names in accessory context, and syncing both HomeKit `Name` and `ConfiguredName`.
+
 ## 1.0.19
 
 - Fixed HomeKit service names for multi-gang switches/outlets not being restored from Homebridge cached display names.

@@ -215,6 +215,17 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
         const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
         const { DECREASING, INCREASING, STOPPED } = this.Characteristic.PositionState;
+        // Prefer real percentage DPs over command strings. Tuya app commands can
+        // be reversed by motor calibration; converted positions are authoritative.
+        if (currentSchema && targetSchema) {
+            const currentStatus = this.getStatus(currentSchema.code);
+            const targetStatus = this.getStatus(targetSchema.code);
+            const currentPosition = this.rawPositionToHomeKit(currentStatus?.value, i);
+            const targetPosition = this.rawPositionToHomeKit(targetStatus?.value, i);
+            if (Math.abs(targetPosition - currentPosition) > 1) {
+                return targetPosition > currentPosition ? INCREASING : DECREASING;
+            }
+        }
         if (controlSchema) {
             const controlStatus = this.getStatus(controlSchema.code);
             if (this.isControlStopped(controlStatus?.value)) {
@@ -239,23 +250,9 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 }
             }
         }
-        if (!currentSchema || !targetSchema) {
-            return STOPPED;
-        }
-        const currentStatus = this.getStatus(currentSchema.code);
-        const targetStatus = this.getStatus(targetSchema.code);
-        const currentPosition = this.rawPositionToHomeKit(currentStatus?.value, i);
-        const targetPosition = this.rawPositionToHomeKit(targetStatus?.value, i);
-        if (targetPosition > currentPosition) {
-            return INCREASING;
-        }
-        else if (targetPosition < currentPosition) {
-            return DECREASING;
-        }
-        else {
-            return STOPPED;
-        }
+        return STOPPED;
     }
+
     configureCurrentPosition(i) {
         const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
         const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
@@ -405,12 +402,18 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
         const externalTarget = this.getExternalMovementTarget(i);
         if (externalTarget !== undefined) {
-            const rawTarget = this.homeKitPositionToRaw(externalTarget, i);
-            if (targetSchema) {
-                this.setStatusValue(targetSchema.code, rawTarget);
-            }
-            if (currentSchema) {
-                this.setStatusValue(currentSchema.code, rawTarget);
+            // Only force guessed final position for control-only motors. With
+            // percent_state / percent_control present, keep the refreshed Tuya
+            // position because open/close command strings can be reversed by Tuya
+            // calibration.
+            if (!targetSchema && !currentSchema) {
+                const rawTarget = this.homeKitPositionToRaw(externalTarget, i);
+                if (targetSchema) {
+                    this.setStatusValue(targetSchema.code, rawTarget);
+                }
+                if (currentSchema) {
+                    this.setStatusValue(currentSchema.code, rawTarget);
+                }
             }
             if (controlSchema) {
                 const controlStatus = this.getStatus(controlSchema.code);
@@ -477,6 +480,15 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 continue;
             }
             if (controlUpdate && this.isControlMoving(controlUpdate.value)) {
+                if (currentSchema || targetSchema) {
+                    // Do not let the Tuya command text become authoritative for
+                    // calibrated/reversed motors. The percent DPs determine real
+                    // HomeKit direction/final state; this timer only prevents stale
+                    // Opening/Closing.
+                    this.scheduleExternalMovementSettle(i, `${controlSchema?.code}=${controlUpdate.value}`);
+                    await this.updateAllValues();
+                    continue;
+                }
                 this.setExternalMovementTarget(i, this.getControlPosition(controlUpdate.value, i));
                 this.scheduleExternalMovementSettle(i, `${controlSchema?.code}=${controlUpdate.value}`);
                 continue;
