@@ -25,7 +25,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
         this.configureCurrentPosition();
         this.configurePositionState();
         this.configureTargetPosition();
-        this.configureStopSwitch();
+        this.removeLegacyStopSwitch();
         this.scheduleStartupMovementReconcile();
     }
     getWindowCoveringOptions(channelName = 'control') {
@@ -66,7 +66,9 @@ class BlindsAccessory extends BaseAccessory_1.default {
             reverseControl: firstBoolean(channelConfig?.reverseControl, windowCovering?.reverseControl, deviceConfig?.reverseControl, deviceConfig?.reverse),
             settleSeconds: (0, util_1.limit)(firstNumber(channelConfig?.settleSeconds, windowCovering?.settleSeconds, deviceConfig?.settleSeconds), 5, 180),
             trustExternalControlState: firstBooleanDefault(true, channelConfig?.trustExternalControlState, windowCovering?.trustExternalControlState, deviceConfig?.trustExternalControlState),
-            externalControlStateMode: channelConfig?.externalControlStateMode || windowCovering?.externalControlStateMode || deviceConfig?.externalControlStateMode || 'followReverseControl',
+            externalControlStateMode: channelConfig?.externalControlStateMode || windowCovering?.externalControlStateMode || deviceConfig?.externalControlStateMode || 'normal',
+            tapToStop: firstBooleanDefault(true, channelConfig?.tapToStop, windowCovering?.tapToStop, deviceConfig?.tapToStop),
+            doubleClickToClose: firstBooleanDefault(true, channelConfig?.doubleClickToClose, windowCovering?.doubleClickToClose, deviceConfig?.doubleClickToClose),
         };
     }
     toLimitedPosition(value, fallback = 50) {
@@ -150,7 +152,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
         }
         const options = this.getWindowCoveringOptions();
         const mode = String(options.externalControlStateMode || 'followReverseControl');
-        const shouldReverse = mode === 'reversed' || (mode !== 'normal' && options.reverseControl === true);
+        const shouldReverse = mode === 'reversed' || (mode === 'followReverseControl' && options.reverseControl === true);
         if (shouldReverse && position !== 50) {
             return 100 - position;
         }
@@ -181,6 +183,11 @@ class BlindsAccessory extends BaseAccessory_1.default {
                 this.scheduleExternalMovementSettle(`startup ${controlSchema.code}=${controlStatus?.value}`);
                 return;
             }
+            if (controlSchema && this.isControlStopped(controlStatus?.value)) {
+                this.setLocalStoppedAtCurrentPosition();
+                this.updateAllValues();
+                return;
+            }
             if (!this.isCurrentAtTarget()) {
                 this.scheduleExternalMovementSettle('startup position mismatch');
             }
@@ -204,6 +211,58 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.device.status.push({ code, value });
         }
         return true;
+    }
+
+    setLocalStoppedAtCurrentPosition(position) {
+        const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_POSITION);
+        const targetSchema = this.getSchema(...SCHEMA_CODE.TARGET_POSITION) ||
+            this.getSchema(...SCHEMA_CODE.POSITION);
+        const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
+        const currentPosition = this.toLimitedPosition(position ?? this.getCurrentHomeKitPosition());
+        this.targetPosition = currentPosition;
+        if (targetSchema) {
+            this.setStatusValue(targetSchema.code, this.homeKitPositionToRaw(currentPosition));
+        }
+        if (!currentSchema && targetSchema) {
+            this.setStatusValue(targetSchema.code, this.homeKitPositionToRaw(currentPosition));
+        }
+        if (controlSchema) {
+            this.setStatusValue(controlSchema.code, this.getStopCommandForControlSchema(controlSchema));
+        }
+        const service = this.getService();
+        service.updateCharacteristic(this.Characteristic.CurrentPosition, currentPosition);
+        service.updateCharacteristic(this.Characteristic.TargetPosition, currentPosition);
+        service.updateCharacteristic(this.Characteristic.PositionState, this.Characteristic.PositionState.STOPPED);
+        return currentPosition;
+    }
+    async stopAtCurrentPosition(controlSchema, targetSchema, reason = 'tap') {
+        this.clearExternalMovementTimer();
+        this.clearExternalMovementTarget();
+        const currentPosition = this.setLocalStoppedAtCurrentPosition();
+        const commands = [];
+        if (controlSchema) {
+            commands.push({ code: controlSchema.code, value: this.getStopCommandForControlSchema(controlSchema) });
+        }
+        else if (targetSchema) {
+            commands.push({ code: targetSchema.code, value: this.homeKitPositionToRaw(currentPosition) });
+        }
+        if (commands.length) {
+            await this.sendCommands(commands, false);
+        }
+        await this.updateAllValues();
+    }
+    shouldStopOnTargetTap(targetPosition) {
+        const options = this.getWindowCoveringOptions();
+        if (options.tapToStop === false) {
+            return false;
+        }
+        if (targetPosition > 5 && targetPosition < 95) {
+            return false;
+        }
+        if (this.externalMovementTarget !== undefined) {
+            return true;
+        }
+        return this.getPositionStateValue() !== this.Characteristic.PositionState.STOPPED;
     }
     /**
      * Configure CurrentPosition characteristic.
@@ -241,10 +300,15 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.getSchema(...SCHEMA_CODE.POSITION);
         const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
         const { DECREASING, INCREASING, STOPPED } = this.Characteristic.PositionState;
-        // If movement was initiated outside HomeKit from the Tuya app, the
-        // open/close command text is the user's semantic intent. Keep HomeKit
-        // direction/final state aligned to that command even when Tuya's numeric
-        // percent DPs are calibrated with the opposite 0/100 meaning.
+        if (controlSchema) {
+            const controlStatus = this.getStatus(controlSchema.code);
+            if (this.isControlStopped(controlStatus?.value)) {
+                return STOPPED;
+            }
+        }
+        // If movement was initiated outside HomeKit from the Tuya app, or from a
+        // HomeKit tap that has not settled yet, keep HomeKit direction aligned to
+        // the temporary target instead of stale Tuya percent DPs.
         if (this.externalMovementTarget !== undefined) {
             const currentPosition = this.getCurrentHomeKitPosition();
             if (Math.abs(this.externalMovementTarget - currentPosition) > 1) {
@@ -266,9 +330,6 @@ class BlindsAccessory extends BaseAccessory_1.default {
         }
         if (controlSchema) {
             const controlStatus = this.getStatus(controlSchema.code);
-            if (this.isControlStopped(controlStatus?.value)) {
-                return STOPPED;
-            }
             if (this.isControlMoving(controlStatus?.value)) {
                 const targetFromCommand = this.externalMovementTarget !== undefined
                     ? this.externalMovementTarget
@@ -314,6 +375,9 @@ class BlindsAccessory extends BaseAccessory_1.default {
             if (this.externalMovementTarget !== undefined) {
                 return this.externalMovementTarget;
             }
+            if (this.targetPosition !== undefined && this.getPositionStateValue() === this.Characteristic.PositionState.STOPPED) {
+                return this.targetPosition;
+            }
             // If target position schema exists, use it
             if (targetSchema) {
                 const status = this.getStatus(targetSchema.code);
@@ -327,7 +391,26 @@ class BlindsAccessory extends BaseAccessory_1.default {
             return this.targetPosition ?? 50;
         })
             .onSet(async (value) => {
-            const targetPos = this.toLimitedPosition(value);
+            let targetPos = this.toLimitedPosition(value);
+            const currentPosition = this.getCurrentHomeKitPosition();
+            const options = this.getWindowCoveringOptions();
+            const now = Date.now();
+            if (this.shouldStopOnTargetTap(targetPos)) {
+                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil && now < this.partialOpenDoubleClickUntil && targetPos >= 95) {
+                    targetPos = 0;
+                    this.partialOpenDoubleClickUntil = 0;
+                }
+                else {
+                    await this.stopAtCurrentPosition(controlSchema, targetSchema, 'tap-to-stop');
+                    return;
+                }
+            }
+            if (currentPosition > 5 && currentPosition < 95 && targetPos >= 95 && options.doubleClickToClose !== false) {
+                this.partialOpenDoubleClickUntil = now + 900;
+            }
+            else {
+                this.partialOpenDoubleClickUntil = 0;
+            }
             this.targetPosition = targetPos;
             this.markHomeKitCommandEchoWindow();
             this.clearExternalMovementTarget();
@@ -354,31 +437,11 @@ class BlindsAccessory extends BaseAccessory_1.default {
             }
         });
     }
-    configureStopSwitch() {
-        const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
-        if (!controlSchema) {
-            return;
+    removeLegacyStopSwitch() {
+        const service = this.accessory.getServiceById(this.Service.Switch, 'blind_stop');
+        if (service) {
+            this.accessory.removeService(service);
         }
-        const serviceName = 'Stop Blind';
-        const service = this.accessory.getServiceById(this.Service.Switch, 'blind_stop') ||
-            this.accessory.addService(this.Service.Switch, serviceName, 'blind_stop');
-        const safeName = this.getPreservedServiceName ? this.getPreservedServiceName(service, serviceName) : serviceName;
-        service.setCharacteristic(this.Characteristic.Name, safeName)
-            .setCharacteristic(this.Characteristic.ConfiguredName, safeName);
-        service.getCharacteristic(this.Characteristic.On)
-            .onGet(() => false)
-            .onSet(async (value) => {
-            if (value !== true) {
-                return;
-            }
-            const stopValue = this.getStopCommandForControlSchema(controlSchema);
-            this.clearExternalMovementTimer();
-            this.clearExternalMovementTarget();
-            this.setStatusValue(controlSchema.code, stopValue);
-            await this.sendCommands([{ code: controlSchema.code, value: stopValue }], false);
-            await this.updateAllValues();
-            setTimeout(() => service.updateCharacteristic(this.Characteristic.On, false), 500);
-        });
     }
 
     /**
@@ -422,6 +485,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
     _resetToIdle() {
         const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
         if (controlSchema) {
+            this.setLocalStoppedAtCurrentPosition();
             this.sendCommands([{ code: controlSchema.code, value: this.getStopCommandForControlSchema(controlSchema) }]);
         }
         this.positionResetTimer = undefined;
@@ -511,6 +575,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
         if (controlSchema) {
             const controlStatus = this.getStatus(controlSchema.code);
             if (this.isControlStopped(controlStatus?.value)) {
+                this.setLocalStoppedAtCurrentPosition();
                 await this.updateAllValues();
                 return;
             }
@@ -562,6 +627,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
         if (controlUpdate && this.isControlStopped(controlUpdate.value)) {
             this.clearExternalMovementTimer();
             this.clearExternalMovementTarget();
+            this.setLocalStoppedAtCurrentPosition();
             await this.updateAllValues();
             return;
         }

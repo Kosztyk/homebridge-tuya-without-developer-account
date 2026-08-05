@@ -158,9 +158,17 @@ class TuyaPlatform {
       }
       if (item.windowCovering && typeof item.windowCovering === 'object') {
         const normalizedWindowCovering = {};
-        for (const key of ['invertPosition', 'reverseControl']) {
+        for (const key of ['invertPosition', 'reverseControl', 'trustExternalControlState', 'tapToStop', 'doubleClickToClose']) {
           if (typeof item.windowCovering[key] === 'boolean') {
             normalizedWindowCovering[key] = item.windowCovering[key];
+          }
+        }
+        if (item.windowCovering.externalControlStateMode !== undefined) {
+          const mode = String(item.windowCovering.externalControlStateMode || '').trim();
+          if (['normal', 'reversed', 'followReverseControl'].includes(mode)) {
+            normalizedWindowCovering.externalControlStateMode = mode;
+          } else {
+            this.log.warn('[Tuya QR] Ignoring invalid windowCovering.externalControlStateMode override for id "%s". Use normal, reversed, or followReverseControl.', id);
           }
         }
         if (item.windowCovering.settleSeconds !== undefined) {
@@ -179,9 +187,17 @@ class TuyaPlatform {
               continue;
             }
             const channelConfig = {};
-            for (const key of ['invertPosition', 'reverseControl']) {
+            for (const key of ['invertPosition', 'reverseControl', 'trustExternalControlState', 'tapToStop', 'doubleClickToClose']) {
               if (typeof rawChannelConfig[key] === 'boolean') {
                 channelConfig[key] = rawChannelConfig[key];
+              }
+            }
+            if (rawChannelConfig.externalControlStateMode !== undefined) {
+              const mode = String(rawChannelConfig.externalControlStateMode || '').trim();
+              if (['normal', 'reversed', 'followReverseControl'].includes(mode)) {
+                channelConfig.externalControlStateMode = mode;
+              } else {
+                this.log.warn('[Tuya QR] Ignoring invalid windowCovering.channels.%s.externalControlStateMode override for id "%s". Use normal, reversed, or followReverseControl.', channel, id);
               }
             }
             if (rawChannelConfig.settleSeconds !== undefined) {

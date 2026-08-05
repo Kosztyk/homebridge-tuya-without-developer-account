@@ -301,7 +301,7 @@
                           "externalControlStateMode": {
                             "type": "string",
                             "title": "Tuya app open/close state mapping",
-                            "default": "followReverseControl",
+                            "default": "normal",
                             "oneOf": [
                               {
                                 "title": "Follow Reverse open/close commands",
@@ -316,6 +316,16 @@
                                 "const": "reversed"
                               }
                             ]
+                          },
+                          "tapToStop": {
+                            "type": "boolean",
+                            "title": "Tap while moving stops blind",
+                            "default": true
+                          },
+                          "doubleClickToClose": {
+                            "type": "boolean",
+                            "title": "Partial-open double tap closes",
+                            "default": true
                           }
                         }
                       }
@@ -323,8 +333,8 @@
                     "externalControlStateMode": {
                       "type": "string",
                       "title": "Tuya app open/close state mapping",
-                      "description": "How Homebridge interprets open/close events coming from the Tuya app. followReverseControl is recommended: if Reverse open/close commands is enabled, Tuya-app state is reversed too.",
-                      "default": "followReverseControl",
+                      "description": "How Homebridge interprets open/close events coming from the Tuya app. Normal is recommended for most devices: Tuya app open = HomeKit open. Use Reversed if Tuya app open still appears as Closing/Closed in Apple Home.",
+                      "default": "normal",
                       "oneOf": [
                         {
                           "title": "Follow Reverse open/close commands",
@@ -339,6 +349,18 @@
                           "const": "reversed"
                         }
                       ]
+                    },
+                    "tapToStop": {
+                      "type": "boolean",
+                      "title": "Tap while moving stops blind",
+                      "description": "When enabled, tapping the HomeKit blind tile while the blind is opening or closing sends the Tuya stop command and sets TargetPosition to the current position, avoiding endless Opening/Closing spinner.",
+                      "default": true
+                    },
+                    "doubleClickToClose": {
+                      "type": "boolean",
+                      "title": "Partial-open double tap closes",
+                      "description": "Best-effort helper for Apple Home: from a partial position, first tap continues opening; a very quick second tap tries to close instead. Apple Home may not always emit a second identical tap event.",
+                      "default": true
                     }
                   }
                 }

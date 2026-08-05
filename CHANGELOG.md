@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.23
+
+- Removed the separate HomeKit **Stop Blind** switch service and automatically removes the old cached stop service from blind/window-covering accessories.
+- Added tap-to-stop behavior on the native HomeKit blind/window-covering tile: while the blind is Opening/Closing, tapping an endpoint command sends Tuya `stop` / `STOP` and sets HomeKit TargetPosition to the current position so Apple Home stops spinning at the partial position.
+- Fixed stopped partial positions by making Tuya `stop` / `stopped` take priority over stale percent target DPs, preventing HomeKit from staying at Opening/Closing after a stop at 50%.
+- Changed default Tuya-app open/close state mapping to `normal` and fixed override normalization so `externalControlStateMode`, `trustExternalControlState`, `tapToStop`, and `doubleClickToClose` are actually preserved from config/UI.
+- Added best-effort partial-position double-tap helper: from a partially open blind, first tap continues opening; a very quick second tap attempts to close instead.
+
 ## 1.0.22
 
 - Fixed Tuya-app blind/curtain state handling for calibrated motors where Tuya reports the app-side command string reversed, for example Tuya app Open arrives as a raw close command.

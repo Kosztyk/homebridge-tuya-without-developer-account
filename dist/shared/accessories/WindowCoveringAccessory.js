@@ -39,7 +39,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             else {
                 this.configureTargetPositionControl(i);
             }
-            this.configureStopSwitch(i);
+            this.removeLegacyStopSwitch(i);
         }
         this.scheduleStartupMovementReconcile(amount);
     }
@@ -82,7 +82,9 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             reverseControl: firstBoolean(channelConfig?.reverseControl, windowCovering?.reverseControl, deviceConfig?.reverseControl, deviceConfig?.reverse),
             settleSeconds: (0, util_1.limit)(firstNumber(channelConfig?.settleSeconds, windowCovering?.settleSeconds, deviceConfig?.settleSeconds), 5, 180),
             trustExternalControlState: firstBooleanDefault(true, channelConfig?.trustExternalControlState, windowCovering?.trustExternalControlState, deviceConfig?.trustExternalControlState),
-            externalControlStateMode: channelConfig?.externalControlStateMode || windowCovering?.externalControlStateMode || deviceConfig?.externalControlStateMode || 'followReverseControl',
+            externalControlStateMode: channelConfig?.externalControlStateMode || windowCovering?.externalControlStateMode || deviceConfig?.externalControlStateMode || 'normal',
+            tapToStop: firstBooleanDefault(true, channelConfig?.tapToStop, windowCovering?.tapToStop, deviceConfig?.tapToStop),
+            doubleClickToClose: firstBooleanDefault(true, channelConfig?.doubleClickToClose, windowCovering?.doubleClickToClose, deviceConfig?.doubleClickToClose),
         };
     }
     toLimitedPosition(value, fallback = 50) {
@@ -178,6 +180,11 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                     this.scheduleExternalMovementSettle(i, `startup ${controlSchema.code}=${controlStatus?.value}`);
                     continue;
                 }
+                if (controlSchema && this.isControlStopped(controlStatus?.value)) {
+                    this.setLocalStoppedAtCurrentPosition(i);
+                    this.updateAllValues();
+                    continue;
+                }
                 if (!this.isCurrentAtTarget(i)) {
                     this.scheduleExternalMovementSettle(i, 'startup position mismatch');
                 }
@@ -209,7 +216,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         const position = this.getBaseControlPosition(value, i);
         const options = this.getWindowCoveringOptions(i);
         const mode = String(options.externalControlStateMode || 'followReverseControl');
-        const shouldReverse = mode === 'reversed' || (mode !== 'normal' && options.reverseControl === true);
+        const shouldReverse = mode === 'reversed' || (mode === 'followReverseControl' && options.reverseControl === true);
         if (shouldReverse && position !== 50) {
             return 100 - position;
         }
@@ -249,11 +256,79 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         }
         return true;
     }
+
+    setLocalStoppedAtCurrentPosition(i, position) {
+        const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
+        const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
+        const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
+        const currentPosition = this.toLimitedPosition(position ?? this.getCurrentHomeKitPosition(i));
+        if (!this.targetPosition) {
+            this.targetPosition = {};
+        }
+        this.targetPosition[i] = currentPosition;
+        if (targetSchema) {
+            this.setStatusValue(targetSchema.code, this.homeKitPositionToRaw(currentPosition, i));
+        }
+        if (!currentSchema && targetSchema) {
+            this.setStatusValue(targetSchema.code, this.homeKitPositionToRaw(currentPosition, i));
+        }
+        if (controlSchema) {
+            this.setStatusValue(controlSchema.code, this.getStopCommandForControlSchema(controlSchema));
+        }
+        const service = this.getServiceForIndex(i);
+        service.updateCharacteristic(this.Characteristic.CurrentPosition, currentPosition);
+        service.updateCharacteristic(this.Characteristic.TargetPosition, currentPosition);
+        service.updateCharacteristic(this.Characteristic.PositionState, this.Characteristic.PositionState.STOPPED);
+        return currentPosition;
+    }
+    async stopAtCurrentPosition(i, controlSchema, targetSchema, reason = 'tap') {
+        this.clearExternalMovementTimer(i);
+        this.clearExternalMovementTarget(i);
+        const currentPosition = this.setLocalStoppedAtCurrentPosition(i);
+        const commands = [];
+        if (controlSchema) {
+            commands.push({ code: controlSchema.code, value: this.getStopCommandForControlSchema(controlSchema) });
+        }
+        else if (targetSchema) {
+            commands.push({ code: targetSchema.code, value: this.homeKitPositionToRaw(currentPosition, i) });
+        }
+        if (commands.length) {
+            await this.sendCommands(commands, false);
+        }
+        await this.updateAllValues();
+    }
+    shouldStopOnTargetTap(i, targetPosition) {
+        const options = this.getWindowCoveringOptions(i);
+        if (options.tapToStop === false) {
+            return false;
+        }
+        if (targetPosition > 5 && targetPosition < 95) {
+            return false;
+        }
+        if (this.getExternalMovementTarget(i) !== undefined) {
+            return true;
+        }
+        return this.getPositionStateValue(i) !== this.Characteristic.PositionState.STOPPED;
+    }
     getPositionStateValue(i) {
         const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
         const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
         const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
         const { DECREASING, INCREASING, STOPPED } = this.Characteristic.PositionState;
+        if (controlSchema) {
+            const controlStatus = this.getStatus(controlSchema.code);
+            if (this.isControlStopped(controlStatus?.value)) {
+                return STOPPED;
+            }
+        }
+        const externalTarget = this.getExternalMovementTarget(i);
+        if (externalTarget !== undefined) {
+            const currentPosition = this.getCurrentHomeKitPosition(i);
+            if (Math.abs(externalTarget - currentPosition) > 1) {
+                return externalTarget > currentPosition ? INCREASING : DECREASING;
+            }
+            return STOPPED;
+        }
         // Prefer real percentage DPs over command strings. Tuya app commands can
         // be reversed by motor calibration; converted positions are authoritative.
         if (currentSchema && targetSchema) {
@@ -267,9 +342,6 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         }
         if (controlSchema) {
             const controlStatus = this.getStatus(controlSchema.code);
-            if (this.isControlStopped(controlStatus?.value)) {
-                return STOPPED;
-            }
             if (this.isControlMoving(controlStatus?.value)) {
                 const targetFromCommand = this.getExternalMovementTarget(i) !== undefined
                     ? this.getExternalMovementTarget(i)
@@ -331,6 +403,9 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             if (externalTarget !== undefined) {
                 return externalTarget;
             }
+            if (this.targetPosition?.[i] !== undefined && this.getPositionStateValue(i) === this.Characteristic.PositionState.STOPPED) {
+                return this.targetPosition[i];
+            }
             const status = this.getStatus(schema.code);
             return this.rawPositionToHomeKit(status?.value, i);
         })
@@ -338,11 +413,35 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             if (!this.targetPosition) {
                 this.targetPosition = {};
             }
-            this.targetPosition[i] = this.toLimitedPosition(value);
+            let targetPosition = this.toLimitedPosition(value);
+            const currentPosition = this.getCurrentHomeKitPosition(i);
+            const options = this.getWindowCoveringOptions(i);
+            const now = Date.now();
+            if (this.shouldStopOnTargetTap(i, targetPosition)) {
+                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i] && targetPosition >= 95) {
+                    targetPosition = 0;
+                    this.partialOpenDoubleClickUntil[i] = 0;
+                }
+                else {
+                    const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
+                    await this.stopAtCurrentPosition(i, controlSchema, schema, 'tap-to-stop');
+                    return;
+                }
+            }
+            if (!this.partialOpenDoubleClickUntil) {
+                this.partialOpenDoubleClickUntil = {};
+            }
+            if (currentPosition > 5 && currentPosition < 95 && targetPosition >= 95 && options.doubleClickToClose !== false) {
+                this.partialOpenDoubleClickUntil[i] = now + 900;
+            }
+            else {
+                this.partialOpenDoubleClickUntil[i] = 0;
+            }
+            this.targetPosition[i] = targetPosition;
             this.markHomeKitCommandEchoWindow(i);
             this.clearExternalMovementTarget(i);
             this.clearExternalMovementTimer(i);
-            await this.sendCommands([{ code: schema.code, value: this.homeKitPositionToRaw(value, i) }], true);
+            await this.sendCommands([{ code: schema.code, value: this.homeKitPositionToRaw(targetPosition, i) }], true);
         });
     }
     configureTargetPositionControl(i) {
@@ -359,6 +458,9 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             if (externalTarget !== undefined) {
                 return externalTarget;
             }
+            if (this.targetPosition?.[i] !== undefined && this.getPositionStateValue(i) === this.Characteristic.PositionState.STOPPED) {
+                return this.targetPosition[i];
+            }
             const status = this.getStatus(schema.code);
             return this.getControlPosition(status?.value, i);
         })
@@ -366,43 +468,46 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             if (!this.targetPosition) {
                 this.targetPosition = {};
             }
-            this.targetPosition[i] = this.toLimitedPosition(value);
+            let targetPosition = this.toLimitedPosition(value);
+            const currentPosition = this.getCurrentHomeKitPosition(i);
+            const options = this.getWindowCoveringOptions(i);
+            const now = Date.now();
+            if (this.shouldStopOnTargetTap(i, targetPosition)) {
+                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i] && targetPosition >= 95) {
+                    targetPosition = 0;
+                    this.partialOpenDoubleClickUntil[i] = 0;
+                }
+                else {
+                    await this.stopAtCurrentPosition(i, schema, undefined, 'tap-to-stop');
+                    return;
+                }
+            }
+            if (!this.partialOpenDoubleClickUntil) {
+                this.partialOpenDoubleClickUntil = {};
+            }
+            if (currentPosition > 5 && currentPosition < 95 && targetPosition >= 95 && options.doubleClickToClose !== false) {
+                this.partialOpenDoubleClickUntil[i] = now + 900;
+            }
+            else {
+                this.partialOpenDoubleClickUntil[i] = 0;
+            }
+            this.targetPosition[i] = targetPosition;
             this.markHomeKitCommandEchoWindow(i);
             this.clearExternalMovementTarget(i);
             this.clearExternalMovementTimer(i);
-            const control = this.getControlCommand(value, i, isOldSchema);
+            const control = this.getControlCommand(targetPosition, i, isOldSchema);
             await this.sendCommands([{ code: schema.code, value: control }], true);
         })
             .setProps({
             minStep: 50,
         });
     }
-    configureStopSwitch(i) {
-        const schema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
-        if (!schema) {
-            return;
-        }
+    removeLegacyStopSwitch(i) {
         const subtype = `blind_stop_${SCHEMA_CODE[i].NAME}`;
-        const defaultName = i === 0 ? 'Stop Blind' : `Stop Blind ${i + 1}`;
-        const service = this.accessory.getServiceById(this.Service.Switch, subtype) ||
-            this.accessory.addService(this.Service.Switch, defaultName, subtype);
-        const safeName = this.getPreservedServiceName ? this.getPreservedServiceName(service, defaultName) : defaultName;
-        service.setCharacteristic(this.Characteristic.Name, safeName)
-            .setCharacteristic(this.Characteristic.ConfiguredName, safeName);
-        service.getCharacteristic(this.Characteristic.On)
-            .onGet(() => false)
-            .onSet(async (value) => {
-            if (value !== true) {
-                return;
-            }
-            const stopValue = this.getStopCommandForControlSchema(schema);
-            this.clearExternalMovementTimer(i);
-            this.clearExternalMovementTarget(i);
-            this.setStatusValue(schema.code, stopValue);
-            await this.sendCommands([{ code: schema.code, value: stopValue }], false);
-            await this.updateAllValues();
-            setTimeout(() => service.updateCharacteristic(this.Characteristic.On, false), 500);
-        });
+        const service = this.accessory.getServiceById(this.Service.Switch, subtype);
+        if (service) {
+            this.accessory.removeService(service);
+        }
     }
 
     clearExternalMovementTimer(i) {
@@ -498,6 +603,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         if (controlSchema) {
             const controlStatus = this.getStatus(controlSchema.code);
             if (this.isControlStopped(controlStatus?.value)) {
+                this.setLocalStoppedAtCurrentPosition(i);
                 await this.updateAllValues();
                 return;
             }
@@ -542,6 +648,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             if (controlUpdate && this.isControlStopped(controlUpdate.value)) {
                 this.clearExternalMovementTimer(i);
                 this.clearExternalMovementTarget(i);
+                this.setLocalStoppedAtCurrentPosition(i);
                 await this.updateAllValues();
                 continue;
             }

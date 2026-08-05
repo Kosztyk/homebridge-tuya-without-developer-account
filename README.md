@@ -542,13 +542,18 @@ For deterministic names, you can still use `deviceOverrides[].switchNames`, for 
 }
 ```
 
-### v1.0.22 Tuya-app blind command handling and Stop button
+### v1.0.23 Blind tap-to-stop and partial-position settling
 
-For calibrated blind motors, external Tuya-app open/close events now follow the same reversal as HomeKit commands by default. This fixes motors where the Tuya app physically opens the blind but the raw Tuya update looks like `close`, causing Apple Home to show `Closing...` and then `Closed`.
+The separate **Stop Blind** tile has been removed. Blind/window-covering accessories now use the native HomeKit blind tile more like a normal HomeKit blind control:
 
-A separate HomeKit **Stop Blind** switch is also exposed for blind/window-covering accessories that have a Tuya control DP. Tapping it sends the Tuya `stop` / `STOP` command and then resets the switch tile back to Off.
+- If the blind is fully closed, tapping opens it.
+- If the blind is fully open, tapping closes it.
+- If the blind is moving, tapping an endpoint command sends Tuya `stop` / `STOP` and immediately sets HomeKit `TargetPosition` to the current position so Apple Home stops showing the endless Opening/Closing spinner.
+- If the blind is partially open and stopped, a normal tap continues opening. A very quick second tap attempts to close instead; this is best-effort because Apple Home does not always emit a second identical tap event to Homebridge.
 
-Recommended configuration for motors that require both position inversion and reversed commands:
+For Tuya-app-triggered open/close commands, the default external state mapping is now `normal`, meaning Tuya app Open = HomeKit Open. Use `reversed` only if Tuya-app Open still appears as Closing/Closed in Apple Home.
+
+Recommended configuration for the reported calibrated blind case:
 
 ```json
 {
@@ -557,7 +562,9 @@ Recommended configuration for motors that require both position inversion and re
     "invertPosition": true,
     "reverseControl": true,
     "trustExternalControlState": true,
-    "externalControlStateMode": "followReverseControl",
+    "externalControlStateMode": "normal",
+    "tapToStop": true,
+    "doubleClickToClose": true,
     "settleSeconds": 35
   }
 }
@@ -565,6 +572,6 @@ Recommended configuration for motors that require both position inversion and re
 
 Advanced `externalControlStateMode` values:
 
-- `followReverseControl` — default and recommended. Tuya-app state is reversed when `reverseControl` is enabled.
-- `normal` — Tuya `open` always means HomeKit open.
-- `reversed` — Tuya `open` always means HomeKit closed.
+- `normal` — default from v1.0.23. Tuya app `open` means HomeKit open.
+- `reversed` — Tuya app `open` means HomeKit closed.
+- `followReverseControl` — Tuya-app state follows `reverseControl`; kept for unusual motors.
