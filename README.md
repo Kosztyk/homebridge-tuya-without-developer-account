@@ -1,3 +1,16 @@
+
+## Homebridge names are authoritative
+
+From v1.0.26, `options.syncHomebridgeNamesToHomeKit` is enabled by default. The plugin pushes the names shown in Homebridge Accessories into HomeKit `Name` and `ConfiguredName` for every service on startup. This is intended to keep Apple Home aligned with Homebridge names for all devices, including multi-gang switches/outlets, fans, lights, blinds, alarms, sensors, and other services.
+
+```json
+{
+  "options": {
+    "syncHomebridgeNamesToHomeKit": true
+  }
+}
+```
+
 <p align="center">
   <img src="./homebridge-ui/public/homebridge-tuya.png" width="96" alt="Tuya without developer account for Homebridge" />
 </p>

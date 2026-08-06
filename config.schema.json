@@ -48,6 +48,12 @@
             "description": "Recommended. Prevents Homebridge restarts from replacing names you assigned to individual services in Apple Home, especially multi-gang switches and outlets. Explicit switchNames overrides still take priority.",
             "default": true
           },
+          "syncHomebridgeNamesToHomeKit": {
+            "type": "boolean",
+            "title": "Sync Homebridge names to Apple Home",
+            "description": "Recommended. Makes the names shown in Homebridge Accessories authoritative for HomeKit service names on every restart. This applies to all devices/services, including multi-gang switches, outlets, fans, blinds, and sensors.",
+            "default": true
+          },
           "deviceOverrides": {
             "type": "array",
             "title": "Device Overrides",

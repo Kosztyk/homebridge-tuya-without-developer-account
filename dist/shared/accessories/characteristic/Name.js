@@ -23,6 +23,9 @@ function getPreserveHomeKitNames(accessory) {
     }
     return globalSetting;
 }
+function getSyncHomebridgeNamesToHomeKit(accessory) {
+    return accessory?.platform?.options?.syncHomebridgeNamesToHomeKit !== false;
+}
 function normalizeNameForCompare(name) {
     return String(name ?? '')
         .toLowerCase()
@@ -133,7 +136,11 @@ function configureName(accessory, service, name, options = {}) {
     const contextNames = accessory.accessory.context.homeKitServiceNames && typeof accessory.accessory.context.homeKitServiceNames === 'object'
         ? accessory.accessory.context.homeKitServiceNames
         : {};
+    const homebridgeContextNames = accessory.accessory.context.homebridgeServiceNames && typeof accessory.accessory.context.homebridgeServiceNames === 'object'
+        ? accessory.accessory.context.homebridgeServiceNames
+        : {};
     accessory.accessory.context.homeKitServiceNames = contextNames;
+    accessory.accessory.context.homebridgeServiceNames = homebridgeContextNames;
 
     let targetName;
     if (forcedName) {
@@ -143,7 +150,9 @@ function configureName(accessory, service, name, options = {}) {
         // Prefer the Homebridge cached service display name. The Accessories page
         // can show a user-edited displayName while the HAP Name/ConfiguredName
         // characteristics still contain stale generated values such as 1/2/3.
-        const orderedCandidates = [displayName, contextNames[subtypeKey], currentConfiguredName, currentName];
+        const orderedCandidates = getSyncHomebridgeNamesToHomeKit(accessory)
+            ? [displayName, homebridgeContextNames[subtypeKey], contextNames[subtypeKey], currentConfiguredName, currentName]
+            : [contextNames[subtypeKey], currentConfiguredName, currentName, displayName];
         for (const candidate of orderedCandidates) {
             const safe = toSafeName(candidate, undefined);
             if (safe && !looksLikePluginGeneratedName(safe, generatedName, accessory, service)) {
@@ -168,6 +177,7 @@ function configureName(accessory, service, name, options = {}) {
 
     if (targetName && !looksLikePluginGeneratedName(targetName, generatedName, accessory, service)) {
         contextNames[subtypeKey] = targetName;
+        homebridgeContextNames[subtypeKey] = targetName;
     }
     // Keep Homebridge's in-memory displayName aligned too. updateCharacteristic()
     // alone does not reliably change the card/service name shown by every UI.

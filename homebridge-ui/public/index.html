@@ -136,7 +136,11 @@
     <input id="tuyaNodevPreserveNames" class="form-check-input" type="checkbox" checked>
     <label class="form-check-label" for="tuyaNodevPreserveNames">Preserve names changed in HomeKit</label>
   </div>
-  <small class="form-text text-muted">Explicit channel names take priority over preserved HomeKit names. Disable preservation only when you want the plugin to reapply generated names at every restart.</small>
+  <div class="form-check mb-3">
+    <input id="tuyaNodevSyncHomebridgeNames" class="form-check-input" type="checkbox" checked>
+    <label class="form-check-label" for="tuyaNodevSyncHomebridgeNames">Use Homebridge accessory names in Apple Home</label>
+  </div>
+  <small class="form-text text-muted">When enabled, the plugin pushes the names shown in Homebridge Accessories into HomeKit Name and ConfiguredName for all services on every restart. Explicit channel names still take priority.</small>
 
   <div class="form-group mt-3">
     <label for="tuyaNodevSwitchDevice">Select multi-switch / outlet device</label>
@@ -484,6 +488,7 @@
     cfg.options.projectType = '3';
     cfg.options.enableAdaptiveLighting = $('tuyaNodevAdaptiveLighting')?.checked === true;
     cfg.options.preserveHomeKitNames = $('tuyaNodevPreserveNames')?.checked !== false;
+    cfg.options.syncHomebridgeNamesToHomeKit = $('tuyaNodevSyncHomebridgeNames')?.checked !== false;
     if (!Array.isArray(cfg.options.deviceOverrides)) {
       cfg.options.deviceOverrides = [];
     }
@@ -1498,6 +1503,7 @@
       if (currentConfig.options?.userCode) setUserCode(currentConfig.options.userCode);
       $('tuyaNodevAdaptiveLighting').checked = currentConfig.options?.enableAdaptiveLighting === true;
       $('tuyaNodevPreserveNames').checked = currentConfig.options?.preserveHomeKitNames !== false;
+      $('tuyaNodevSyncHomebridgeNames').checked = currentConfig.options?.syncHomebridgeNamesToHomeKit !== false;
       ensureConfig();
 
       if (homebridge.showSchemaForm) homebridge.showSchemaForm();
@@ -1514,6 +1520,7 @@
           else if (getUserCode()) setUserCode(getUserCode());
           $('tuyaNodevAdaptiveLighting').checked = block.options?.enableAdaptiveLighting === true;
           $('tuyaNodevPreserveNames').checked = block.options?.preserveHomeKitNames !== false;
+          $('tuyaNodevSyncHomebridgeNames').checked = block.options?.syncHomebridgeNamesToHomeKit !== false;
           ensureConfig();
           renderAcOverrides();
           renderSwitchNameOverrides();

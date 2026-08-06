@@ -83,7 +83,73 @@ class AccessoryFactory {
         handler.configureStatusActive();
         handler.updateAllValues();
         handler.initialized = true;
+        AccessoryFactory.syncHomebridgeNamesToHomeKit(platform, accessory);
         return handler;
+    }
+    static syncHomebridgeNamesToHomeKit(platform, accessory) {
+        if (platform?.options?.syncHomebridgeNamesToHomeKit === false) {
+            return;
+        }
+        const Characteristic = platform.Characteristic;
+        const skipUUIDs = new Set([
+            platform.Service.AccessoryInformation.UUID,
+            platform.Service.Battery.UUID,
+        ]);
+        let changed = false;
+        for (const service of accessory.services || []) {
+            if (!service || skipUUIDs.has(service.UUID)) {
+                continue;
+            }
+            const displayName = typeof service.displayName === 'string'
+                ? ((0, util_1.sanitizeName)(service.displayName.trim()) ?? service.displayName.trim())
+                : '';
+            if (!displayName) {
+                continue;
+            }
+            if (/^(accessory information|battery|service)$/i.test(displayName)) {
+                continue;
+            }
+            try {
+                if (!service.testCharacteristic(Characteristic.ConfiguredName)) {
+                    service.addOptionalCharacteristic(Characteristic.ConfiguredName);
+                }
+                const currentName = service.testCharacteristic(Characteristic.Name)
+                    ? service.getCharacteristic(Characteristic.Name).value
+                    : undefined;
+                const currentConfiguredName = service.testCharacteristic(Characteristic.ConfiguredName)
+                    ? service.getCharacteristic(Characteristic.ConfiguredName).value
+                    : undefined;
+                const currentNameText = typeof currentName === 'string' ? currentName.trim() : '';
+                const currentConfiguredText = typeof currentConfiguredName === 'string' ? currentConfiguredName.trim() : '';
+                if (currentNameText !== displayName || currentConfiguredText !== displayName) {
+                    service.updateCharacteristic(Characteristic.Name, displayName);
+                    service.updateCharacteristic(Characteristic.ConfiguredName, displayName);
+                    service.displayName = displayName;
+                    changed = true;
+                    platform.log.info(`[Tuya QR] Synced Homebridge service name to HomeKit for ${accessory.displayName}: ${currentNameText || currentConfiguredText || service.subtype || service.UUID} -> ${displayName}`);
+                }
+                accessory.context.homebridgeServiceNames = accessory.context.homebridgeServiceNames && typeof accessory.context.homebridgeServiceNames === 'object'
+                    ? accessory.context.homebridgeServiceNames
+                    : {};
+                const subtypeKey = String(service.subtype || service.displayName || service.UUID);
+                accessory.context.homebridgeServiceNames[subtypeKey] = displayName;
+                accessory.context.homeKitServiceNames = accessory.context.homeKitServiceNames && typeof accessory.context.homeKitServiceNames === 'object'
+                    ? accessory.context.homeKitServiceNames
+                    : {};
+                accessory.context.homeKitServiceNames[subtypeKey] = displayName;
+            }
+            catch (error) {
+                platform.log.debug(`Failed to sync Homebridge service name for ${accessory.displayName}:`, error);
+            }
+        }
+        if (changed) {
+            try {
+                platform.api.updatePlatformAccessories([accessory]);
+            }
+            catch (error) {
+                platform.log.debug(`Failed to persist synced Homebridge names for ${accessory.displayName}:`, error);
+            }
+        }
     }
     static configAccessory(platform, accessory) {
         const configs = platform.options.serviceInformationOverrides;

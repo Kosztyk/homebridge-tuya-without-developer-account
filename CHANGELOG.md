@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.26
+
+- Added global Homebridge-name sync for all devices/services.
+- New option `options.syncHomebridgeNamesToHomeKit` defaults to `true`.
+- The names visible in Homebridge Accessories are now pushed into HomeKit `Name` and `ConfiguredName` on every startup.
+- Applies generically to switches, outlets, fans, lights, blinds/window coverings, sensors, pet feeders, alarms, and other service types, not only multi-gang switch channels.
+- Stores synced names in accessory context and calls `updatePlatformAccessories` so Apple Home receives the Homebridge service names after restart.
+
 ## 1.0.25
 
 - Removed/cleans up legacy Stop Blind switch services more aggressively so the blind is no longer represented as a combined Window Covering + Switch accessory in Apple Home or Control Center.

@@ -53,6 +53,12 @@ class TuyaPlatform {
     this.options.preserveHomeKitNames = typeof this.options.preserveHomeKitNames === 'boolean'
       ? this.options.preserveHomeKitNames
       : (typeof this.options.nameOverride === 'boolean' ? this.options.nameOverride : true);
+    // Push names edited/shown in Homebridge Accessories back into HAP Name/ConfiguredName.
+    // This is stronger than preserveHomeKitNames: it makes Homebridge's visible names
+    // authoritative for Apple Home for every service, not only multi-gang switches.
+    this.options.syncHomebridgeNamesToHomeKit = typeof this.options.syncHomebridgeNamesToHomeKit === 'boolean'
+      ? this.options.syncHomebridgeNamesToHomeKit
+      : true;
 
     if (!this.options.userCode || String(this.options.userCode).trim().length === 0) {
       this.log.error("[Tuya QR] Missing Tuya User Code. Open Homebridge UI → Plugins → Tuya without developer account for Homebridge → Settings, generate/scan the QR code, then save.");
@@ -416,6 +422,7 @@ class TuyaPlatform {
         globalAdaptiveLighting: !!this.options.enableAdaptiveLighting,
         adaptiveLighting: deviceConfig?.adaptiveLighting ? JSON.stringify(deviceConfig.adaptiveLighting) : undefined,
         globalPreserveHomeKitNames: this.options.preserveHomeKitNames !== false,
+        globalSyncHomebridgeNamesToHomeKit: this.options.syncHomebridgeNamesToHomeKit !== false,
         preserveHomeKitNames: typeof deviceConfig?.preserveHomeKitNames === 'boolean' ? deviceConfig.preserveHomeKitNames : undefined,
         switchNames: deviceConfig?.switchNames ? JSON.stringify(deviceConfig.switchNames) : undefined,
       };
