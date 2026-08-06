@@ -69,6 +69,8 @@ class BlindsAccessory extends BaseAccessory_1.default {
             externalControlStateMode: channelConfig?.externalControlStateMode || windowCovering?.externalControlStateMode || deviceConfig?.externalControlStateMode || 'normal',
             tapToStop: firstBooleanDefault(true, channelConfig?.tapToStop, windowCovering?.tapToStop, deviceConfig?.tapToStop),
             doubleClickToClose: firstBooleanDefault(true, channelConfig?.doubleClickToClose, windowCovering?.doubleClickToClose, deviceConfig?.doubleClickToClose),
+            travelSeconds: (0, util_1.limit)(firstNumber(channelConfig?.travelSeconds, windowCovering?.travelSeconds, deviceConfig?.travelSeconds, channelConfig?.settleSeconds, windowCovering?.settleSeconds, deviceConfig?.settleSeconds), 5, 180),
+            estimatePositionOnStop: firstBooleanDefault(true, channelConfig?.estimatePositionOnStop, windowCovering?.estimatePositionOnStop, deviceConfig?.estimatePositionOnStop),
         };
     }
     toLimitedPosition(value, fallback = 50) {
@@ -212,19 +214,65 @@ class BlindsAccessory extends BaseAccessory_1.default {
         }
         return true;
     }
+    markMovementStart(startPosition, targetPosition) {
+        this.stoppedHoldUntil = 0;
+        this.movementStart = {
+            startPosition: this.toLimitedPosition(startPosition),
+            targetPosition: this.toLimitedPosition(targetPosition),
+            startedAt: Date.now(),
+        };
+    }
+    clearMovementStart() {
+        this.movementStart = undefined;
+    }
+    isPartialHomeKitPosition(position) {
+        const value = this.toLimitedPosition(position);
+        return value > 0 && value < 100;
+    }
+    isStoppedHoldActive() {
+        return Number(this.stoppedHoldUntil || 0) > Date.now();
+    }
+    markStoppedHold() {
+        this.stoppedHoldUntil = Date.now() + 60000;
+    }
+    getEstimatedHomeKitPosition() {
+        if (!this.movementStart) {
+            return this.getCurrentHomeKitPosition();
+        }
+        const options = this.getWindowCoveringOptions();
+        const travelSeconds = Math.max(1, Number(options.travelSeconds || options.settleSeconds || 35));
+        const elapsed = Math.max(0, (Date.now() - this.movementStart.startedAt) / 1000);
+        const progress = (0, util_1.limit)(elapsed / travelSeconds, 0, 1);
+        const estimated = this.movementStart.startPosition + ((this.movementStart.targetPosition - this.movementStart.startPosition) * progress);
+        return this.toLimitedPosition(Math.round(estimated));
+    }
+    updateServiceStoppedAt(position) {
+        const service = this.getService();
+        const currentPosition = this.toLimitedPosition(position);
+        service.updateCharacteristic(this.Characteristic.CurrentPosition, currentPosition);
+        service.updateCharacteristic(this.Characteristic.TargetPosition, currentPosition);
+        service.updateCharacteristic(this.Characteristic.PositionState, this.Characteristic.PositionState.STOPPED);
+    }
 
     setLocalStoppedAtCurrentPosition(position) {
         const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_POSITION);
         const targetSchema = this.getSchema(...SCHEMA_CODE.TARGET_POSITION) ||
             this.getSchema(...SCHEMA_CODE.POSITION);
         const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
-        const currentPosition = this.toLimitedPosition(position ?? this.getCurrentHomeKitPosition());
+        const options = this.getWindowCoveringOptions();
+        const currentPosition = this.toLimitedPosition(position ?? (options.estimatePositionOnStop === false ? this.getCurrentHomeKitPosition() : this.getEstimatedHomeKitPosition()));
         this.targetPosition = currentPosition;
+        this.clearMovementStart();
+        this.markStoppedHold();
+        const rawCurrentPosition = this.homeKitPositionToRaw(currentPosition);
+        if (currentSchema) {
+            this.setStatusValue(currentSchema.code, rawCurrentPosition);
+        }
         if (targetSchema) {
-            this.setStatusValue(targetSchema.code, this.homeKitPositionToRaw(currentPosition));
+            this.setStatusValue(targetSchema.code, rawCurrentPosition);
         }
         if (!currentSchema && targetSchema) {
-            this.setStatusValue(targetSchema.code, this.homeKitPositionToRaw(currentPosition));
+            this.setStatusValue(targetSchema.code, rawCurrentPosition);
         }
         if (controlSchema) {
             this.setStatusValue(controlSchema.code, this.getStopCommandForControlSchema(controlSchema));
@@ -237,6 +285,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
     }
     async stopAtCurrentPosition(controlSchema, targetSchema, reason = 'tap') {
         this.clearExternalMovementTimer();
+        this.clearHomeKitMovementTimer();
         this.clearExternalMovementTarget();
         const currentPosition = this.setLocalStoppedAtCurrentPosition();
         const commands = [];
@@ -249,6 +298,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
         if (commands.length) {
             await this.sendCommands(commands, false);
         }
+        this.setLocalStoppedAtCurrentPosition(currentPosition);
         await this.updateAllValues();
     }
     shouldStopOnTargetTap(targetPosition) {
@@ -275,6 +325,9 @@ class BlindsAccessory extends BaseAccessory_1.default {
         const service = this.getService();
         service.getCharacteristic(this.Characteristic.CurrentPosition)
             .onGet(() => {
+            if (this.isStoppedHoldActive() && this.targetPosition !== undefined) {
+                return this.targetPosition;
+            }
             // Prefer current position schema if available
             if (currentSchema) {
                 const status = this.getStatus(currentSchema.code);
@@ -305,6 +358,9 @@ class BlindsAccessory extends BaseAccessory_1.default {
             if (this.isControlStopped(controlStatus?.value)) {
                 return STOPPED;
             }
+        }
+        if (this.isStoppedHoldActive() && this.targetPosition !== undefined) {
+            return STOPPED;
         }
         // If movement was initiated outside HomeKit from the Tuya app, or from a
         // HomeKit tap that has not settled yet, keep HomeKit direction aligned to
@@ -395,8 +451,11 @@ class BlindsAccessory extends BaseAccessory_1.default {
             const currentPosition = this.getCurrentHomeKitPosition();
             const options = this.getWindowCoveringOptions();
             const now = Date.now();
+            const endpointTap = targetPos <= 5 || targetPos >= 95;
+            const isPartial = this.isPartialHomeKitPosition(currentPosition);
+            const wasStopped = this.getPositionStateValue() === this.Characteristic.PositionState.STOPPED;
             if (this.shouldStopOnTargetTap(targetPos)) {
-                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil && now < this.partialOpenDoubleClickUntil && targetPos >= 95) {
+                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil && now < this.partialOpenDoubleClickUntil && endpointTap) {
                     targetPos = 0;
                     this.partialOpenDoubleClickUntil = 0;
                 }
@@ -405,16 +464,31 @@ class BlindsAccessory extends BaseAccessory_1.default {
                     return;
                 }
             }
-            if (currentPosition > 5 && currentPosition < 95 && targetPos >= 95 && options.doubleClickToClose !== false) {
-                this.partialOpenDoubleClickUntil = now + 900;
+            if (wasStopped && isPartial && endpointTap) {
+                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil && now < this.partialOpenDoubleClickUntil) {
+                    targetPos = 0;
+                    this.partialOpenDoubleClickUntil = 0;
+                }
+                else {
+                    // For any partial position (1-99%), a normal tap resumes opening.
+                    // A second very fast tap closes instead, when HomeKit sends it.
+                    targetPos = 100;
+                    this.partialOpenDoubleClickUntil = options.doubleClickToClose === false ? 0 : now + 650;
+                }
+            }
+            else if (isPartial && targetPos >= 95 && options.doubleClickToClose !== false) {
+                this.partialOpenDoubleClickUntil = now + 650;
             }
             else {
                 this.partialOpenDoubleClickUntil = 0;
             }
+            this.stoppedHoldUntil = 0;
             this.targetPosition = targetPos;
+            this.markMovementStart(currentPosition, targetPos);
             this.markHomeKitCommandEchoWindow();
             this.clearExternalMovementTarget();
             this.clearExternalMovementTimer();
+            this.clearHomeKitMovementTimer();
             // Clear any pending reset timer
             if (this.positionResetTimer) {
                 clearTimeout(this.positionResetTimer);
@@ -424,6 +498,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
             if (targetSchema && targetSchema.code !== 'control' && targetSchema.code !== 'mach_operate') {
                 const rawTargetPos = this.homeKitPositionToRaw(targetPos);
                 await this.sendCommands([{ code: targetSchema.code, value: rawTargetPos }], true);
+                this.scheduleHomeKitMovementSettle(targetPos, 'homekit percent target');
             }
             else if (controlSchema) {
                 // Otherwise, use the control schema (open/close/stop), applying optional reverseControl
@@ -431,6 +506,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
                 await this.sendCommands([{ code: controlSchema.code, value: controlValue }], true);
                 // Schedule idle reset after 30 seconds if device doesn't report position
                 // This prevents the blinds from continuously moving
+                this.scheduleHomeKitMovementSettle(targetPos, 'homekit control target');
                 this.positionResetTimer = setTimeout(() => {
                     this._resetToIdle();
                 }, 30 * 1000);
@@ -438,9 +514,22 @@ class BlindsAccessory extends BaseAccessory_1.default {
         });
     }
     removeLegacyStopSwitch() {
-        const service = this.accessory.getServiceById(this.Service.Switch, 'blind_stop');
-        if (service) {
-            this.accessory.removeService(service);
+        const knownSubtypes = ['blind_stop', 'blind_stop_control', 'blind_stop_control_2'];
+        for (const subtype of knownSubtypes) {
+            const service = this.accessory.getServiceById(this.Service.Switch, subtype);
+            if (service) {
+                this.accessory.removeService(service);
+            }
+        }
+        for (const service of [...this.accessory.services]) {
+            if (service.UUID !== this.Service.Switch.UUID) {
+                continue;
+            }
+            const displayName = String(service.displayName || service.getCharacteristic(this.Characteristic.Name)?.value || '').toLowerCase();
+            const subtype = String(service.subtype || '').toLowerCase();
+            if (displayName.includes('stop blind') || displayName.includes('stop curtain') || subtype.startsWith('blind_stop')) {
+                this.accessory.removeService(service);
+            }
         }
     }
 
@@ -490,6 +579,51 @@ class BlindsAccessory extends BaseAccessory_1.default {
         }
         this.positionResetTimer = undefined;
     }
+    clearHomeKitMovementTimer() {
+        if (this.homeKitMovementTimer) {
+            clearTimeout(this.homeKitMovementTimer);
+            this.homeKitMovementTimer = undefined;
+        }
+    }
+    scheduleHomeKitMovementSettle(targetPosition, reason = 'homekit target') {
+        this.clearHomeKitMovementTimer();
+        const delay = this.getWindowCoveringOptions().settleSeconds * 1000;
+        this.homeKitMovementTimer = setTimeout(async () => {
+            this.homeKitMovementTimer = undefined;
+            try {
+                await this.settleHomeKitMovement(targetPosition, reason);
+            }
+            catch (error) {
+                this.log.warn('Failed to settle HomeKit blinds movement: %s', error instanceof Error ? error.message : error);
+            }
+        }, delay);
+    }
+    async settleHomeKitMovement(targetPosition, reason = 'homekit target') {
+        await this.refreshDeviceFromCloud();
+        const target = this.toLimitedPosition(targetPosition ?? this.targetPosition ?? this.getEstimatedHomeKitPosition());
+        const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_POSITION);
+        const targetSchema = this.getSchema(...SCHEMA_CODE.TARGET_POSITION) ||
+            this.getSchema(...SCHEMA_CODE.POSITION);
+        const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
+        const rawTarget = this.homeKitPositionToRaw(target);
+        if (currentSchema) {
+            this.setStatusValue(currentSchema.code, rawTarget);
+        }
+        if (targetSchema) {
+            this.setStatusValue(targetSchema.code, rawTarget);
+        }
+        if (controlSchema) {
+            const controlStatus = this.getStatus(controlSchema.code);
+            if (this.isControlMoving(controlStatus?.value)) {
+                this.setStatusValue(controlSchema.code, this.getStopCommandForControlSchema(controlSchema));
+            }
+        }
+        this.targetPosition = target;
+        this.clearMovementStart();
+        this.updateServiceStoppedAt(target);
+        await this.updateAllValues();
+    }
+
     clearExternalMovementTimer() {
         if (this.externalMovementTimer) {
             clearTimeout(this.externalMovementTimer);
@@ -569,6 +703,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
                 }
             }
             this.clearExternalMovementTarget();
+            this.clearMovementStart();
             await this.updateAllValues();
             return;
         }

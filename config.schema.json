@@ -326,6 +326,20 @@
                             "type": "boolean",
                             "title": "Partial-open double tap closes",
                             "default": true
+                          },
+                          "travelSeconds": {
+                            "type": "integer",
+                            "title": "Estimated full travel time",
+                            "description": "Approximate seconds for the blind/curtain to travel fully open-to-closed. Used only to estimate the partial position when tapping to stop and Tuya does not report live percent_state while moving.",
+                            "default": 35,
+                            "minimum": 5,
+                            "maximum": 180
+                          },
+                          "estimatePositionOnStop": {
+                            "type": "boolean",
+                            "title": "Estimate partial position when stopped",
+                            "description": "When enabled, if Tuya does not report a live position while moving, Homebridge estimates the current partial position when you tap to stop so Apple Home does not remain stuck as Opening/Closing.",
+                            "default": true
                           }
                         }
                       }
@@ -360,6 +374,20 @@
                       "type": "boolean",
                       "title": "Partial-open double tap closes",
                       "description": "Best-effort helper for Apple Home: from a partial position, first tap continues opening; a very quick second tap tries to close instead. Apple Home may not always emit a second identical tap event.",
+                      "default": true
+                    },
+                    "travelSeconds": {
+                      "type": "integer",
+                      "title": "Estimated full travel time",
+                      "description": "Approximate seconds for the blind/curtain to travel fully open-to-closed. Used only to estimate the partial position when tapping to stop and Tuya does not report live percent_state while moving.",
+                      "default": 35,
+                      "minimum": 5,
+                      "maximum": 180
+                    },
+                    "estimatePositionOnStop": {
+                      "type": "boolean",
+                      "title": "Estimate partial position when stopped",
+                      "description": "When enabled, if Tuya does not report a live position while moving, Homebridge estimates the current partial position when you tap to stop so Apple Home does not remain stuck as Opening/Closing.",
                       "default": true
                     }
                   }

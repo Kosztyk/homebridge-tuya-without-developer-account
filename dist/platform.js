@@ -158,7 +158,7 @@ class TuyaPlatform {
       }
       if (item.windowCovering && typeof item.windowCovering === 'object') {
         const normalizedWindowCovering = {};
-        for (const key of ['invertPosition', 'reverseControl', 'trustExternalControlState', 'tapToStop', 'doubleClickToClose']) {
+        for (const key of ['invertPosition', 'reverseControl', 'trustExternalControlState', 'tapToStop', 'doubleClickToClose', 'estimatePositionOnStop']) {
           if (typeof item.windowCovering[key] === 'boolean') {
             normalizedWindowCovering[key] = item.windowCovering[key];
           }
@@ -179,6 +179,14 @@ class TuyaPlatform {
             this.log.warn('[Tuya QR] Ignoring invalid windowCovering.settleSeconds override for id "%s". Use a number from 5 to 180.', id);
           }
         }
+        if (item.windowCovering.travelSeconds !== undefined) {
+          const travelSeconds = Number(item.windowCovering.travelSeconds);
+          if (Number.isFinite(travelSeconds)) {
+            normalizedWindowCovering.travelSeconds = Math.max(5, Math.min(180, Math.round(travelSeconds)));
+          } else {
+            this.log.warn('[Tuya QR] Ignoring invalid windowCovering.travelSeconds override for id "%s". Use a number from 5 to 180.', id);
+          }
+        }
         if (item.windowCovering.channels && typeof item.windowCovering.channels === 'object' && !Array.isArray(item.windowCovering.channels)) {
           const normalizedChannels = {};
           for (const [rawChannel, rawChannelConfig] of Object.entries(item.windowCovering.channels)) {
@@ -187,7 +195,7 @@ class TuyaPlatform {
               continue;
             }
             const channelConfig = {};
-            for (const key of ['invertPosition', 'reverseControl', 'trustExternalControlState', 'tapToStop', 'doubleClickToClose']) {
+            for (const key of ['invertPosition', 'reverseControl', 'trustExternalControlState', 'tapToStop', 'doubleClickToClose', 'estimatePositionOnStop']) {
               if (typeof rawChannelConfig[key] === 'boolean') {
                 channelConfig[key] = rawChannelConfig[key];
               }
@@ -206,6 +214,14 @@ class TuyaPlatform {
                 channelConfig.settleSeconds = Math.max(5, Math.min(180, Math.round(settleSeconds)));
               } else {
                 this.log.warn('[Tuya QR] Ignoring invalid windowCovering.channels.%s.settleSeconds override for id "%s". Use a number from 5 to 180.', channel, id);
+              }
+            }
+            if (rawChannelConfig.travelSeconds !== undefined) {
+              const travelSeconds = Number(rawChannelConfig.travelSeconds);
+              if (Number.isFinite(travelSeconds)) {
+                channelConfig.travelSeconds = Math.max(5, Math.min(180, Math.round(travelSeconds)));
+              } else {
+                this.log.warn('[Tuya QR] Ignoring invalid windowCovering.channels.%s.travelSeconds override for id "%s". Use a number from 5 to 180.', channel, id);
               }
             }
             if (Object.keys(channelConfig).length > 0) {

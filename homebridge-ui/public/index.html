@@ -286,6 +286,18 @@
     <small class="form-text text-muted">Best-effort helper: from a partial position, first tap continues opening; a very quick second tap tries to close instead. Apple Home may not always emit a second identical tap event.</small>
   </div>
 
+  <div class="form-check mb-2">
+    <input id="tuyaNodevCoverEstimateStop" class="form-check-input" type="checkbox" checked>
+    <label class="form-check-label" for="tuyaNodevCoverEstimateStop">Estimate partial position when stopped</label>
+    <small class="form-text text-muted">Use this when Tuya does not send live percent_state while moving. Homebridge estimates the partial position when you tap to stop and forces Apple Home out of Opening/Closing.</small>
+  </div>
+
+  <div class="form-group">
+    <label for="tuyaNodevCoverTravelSeconds">Estimated full travel time</label>
+    <input id="tuyaNodevCoverTravelSeconds" class="form-control" type="number" min="5" max="180" step="1" placeholder="35">
+    <small class="form-text text-muted">Seconds for a full open-to-close movement. Used only for stop-position estimation. Leave blank for default.</small>
+  </div>
+
   <div class="tuya-nodev-actions">
     <button id="tuyaNodevLoadCoverDevices" class="btn btn-outline-primary" type="button">Load Detected Devices</button>
     <button id="tuyaNodevApplyCover" class="btn btn-primary" type="button">Add / Update Blind Override</button>
@@ -782,6 +794,8 @@
     $('tuyaNodevCoverReverse').checked = override.windowCovering?.reverseControl === true;
     if ($('tuyaNodevCoverTapToStop')) $('tuyaNodevCoverTapToStop').checked = override.windowCovering?.tapToStop !== false;
     if ($('tuyaNodevCoverDoubleClickToClose')) $('tuyaNodevCoverDoubleClickToClose').checked = override.windowCovering?.doubleClickToClose !== false;
+    if ($('tuyaNodevCoverEstimateStop')) $('tuyaNodevCoverEstimateStop').checked = override.windowCovering?.estimatePositionOnStop !== false;
+    if ($('tuyaNodevCoverTravelSeconds')) $('tuyaNodevCoverTravelSeconds').value = Number.isFinite(Number(override.windowCovering?.travelSeconds)) ? String(Math.max(5, Math.min(180, Math.round(Number(override.windowCovering.travelSeconds))))) : '';
     if ($('tuyaNodevCoverExternalMode')) {
       $('tuyaNodevCoverExternalMode').value = override.windowCovering?.externalControlStateMode || 'normal';
     }
@@ -800,11 +814,17 @@
     const externalControlStateMode = $('tuyaNodevCoverExternalMode')?.value || 'normal';
     const tapToStop = $('tuyaNodevCoverTapToStop')?.checked !== false;
     const doubleClickToClose = $('tuyaNodevCoverDoubleClickToClose')?.checked !== false;
+    const estimatePositionOnStop = $('tuyaNodevCoverEstimateStop')?.checked !== false;
+    const travelSeconds = Number($('tuyaNodevCoverTravelSeconds')?.value);
     const override = ensureDeviceOverride(id);
     const existingSettleSeconds = Number(override.windowCovering?.settleSeconds);
     const hasExternalMode = externalControlStateMode && externalControlStateMode !== 'normal';
-    if (invertPosition || reverseControl || hasExternalMode || tapToStop !== true || doubleClickToClose !== true || Number.isFinite(existingSettleSeconds)) {
-      override.windowCovering = { invertPosition, reverseControl, externalControlStateMode, tapToStop, doubleClickToClose };
+    const hasTravelSeconds = Number.isFinite(travelSeconds) && travelSeconds >= 5;
+    if (invertPosition || reverseControl || hasExternalMode || tapToStop !== true || doubleClickToClose !== true || estimatePositionOnStop !== true || hasTravelSeconds || Number.isFinite(existingSettleSeconds)) {
+      override.windowCovering = { invertPosition, reverseControl, externalControlStateMode, tapToStop, doubleClickToClose, estimatePositionOnStop };
+      if (hasTravelSeconds) {
+        override.windowCovering.travelSeconds = Math.max(5, Math.min(180, Math.round(travelSeconds)));
+      }
       if (Number.isFinite(existingSettleSeconds)) {
         override.windowCovering.settleSeconds = Math.max(5, Math.min(180, Math.round(existingSettleSeconds)));
       }

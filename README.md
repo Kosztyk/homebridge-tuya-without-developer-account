@@ -2,6 +2,13 @@
   <img src="./homebridge-ui/public/homebridge-tuya.png" width="96" alt="Tuya without developer account for Homebridge" />
 </p>
 
+
+### Blind / curtain stop behavior
+
+From v1.0.25, the plugin does not expose a separate **Stop Blind** switch. Stop is handled on the native HomeKit Window Covering tile: if the blind/curtain is currently Opening or Closing, tapping the tile again sends the Tuya `stop` / `STOP` command and forces HomeKit to settle at the partial position. This avoids the previous combined Window Covering + Switch presentation, which could confuse Apple Home and Control Center widgets.
+
+For motors that do not report live `percent_state` while moving, use `windowCovering.travelSeconds` to tune the estimated stop position.
+
 # Tuya without developer account for Homebridge
 
 Current release: **1.0.6**

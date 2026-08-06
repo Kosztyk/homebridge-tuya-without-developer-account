@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.25
+
+- Removed/cleans up legacy Stop Blind switch services more aggressively so the blind is no longer represented as a combined Window Covering + Switch accessory in Apple Home or Control Center.
+- Keeps stop behavior on the native HomeKit blind/window-covering tile: tap while Opening/Closing sends Tuya stop / STOP.
+- Fixed partial-stop state settling: after tapping stop, Homebridge now sets both CurrentPosition and TargetPosition to the stopped partial position and marks PositionState as STOPPED, preventing Apple Home from staying on Opening/Closing with a spinner.
+- Added local motion tracking and optional position estimation for motors that do not report live percent_state while moving.
+- Added optional windowCovering.travelSeconds and windowCovering.estimatePositionOnStop options, including per-channel equivalents.
+- HomeKit-initiated percent targets now get a settle timer too, so a 30%/50% slider target can settle as Opened 30%/50% even when Tuya does not emit a final current-position update.
+
 ## 1.0.23
 
 - Removed the separate HomeKit **Stop Blind** switch service and automatically removes the old cached stop service from blind/window-covering accessories.

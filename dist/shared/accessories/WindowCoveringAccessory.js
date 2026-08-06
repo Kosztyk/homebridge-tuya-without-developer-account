@@ -85,6 +85,8 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             externalControlStateMode: channelConfig?.externalControlStateMode || windowCovering?.externalControlStateMode || deviceConfig?.externalControlStateMode || 'normal',
             tapToStop: firstBooleanDefault(true, channelConfig?.tapToStop, windowCovering?.tapToStop, deviceConfig?.tapToStop),
             doubleClickToClose: firstBooleanDefault(true, channelConfig?.doubleClickToClose, windowCovering?.doubleClickToClose, deviceConfig?.doubleClickToClose),
+            travelSeconds: (0, util_1.limit)(firstNumber(channelConfig?.travelSeconds, windowCovering?.travelSeconds, deviceConfig?.travelSeconds, channelConfig?.settleSeconds, windowCovering?.settleSeconds, deviceConfig?.settleSeconds), 5, 180),
+            estimatePositionOnStop: firstBooleanDefault(true, channelConfig?.estimatePositionOnStop, windowCovering?.estimatePositionOnStop, deviceConfig?.estimatePositionOnStop),
         };
     }
     toLimitedPosition(value, fallback = 50) {
@@ -256,21 +258,79 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         }
         return true;
     }
+    markMovementStart(i, startPosition, targetPosition) {
+        this.clearStoppedHold(i);
+        if (!this.movementStarts) {
+            this.movementStarts = new Map();
+        }
+        this.movementStarts.set(i, {
+            startPosition: this.toLimitedPosition(startPosition),
+            targetPosition: this.toLimitedPosition(targetPosition),
+            startedAt: Date.now(),
+        });
+    }
+    clearMovementStart(i) {
+        this.movementStarts?.delete(i);
+    }
+    isPartialHomeKitPosition(position) {
+        const value = this.toLimitedPosition(position);
+        return value > 0 && value < 100;
+    }
+    markStoppedHold(i) {
+        if (!this.stoppedHoldUntil) {
+            this.stoppedHoldUntil = {};
+        }
+        this.stoppedHoldUntil[i] = Date.now() + 60000;
+    }
+    clearStoppedHold(i) {
+        if (this.stoppedHoldUntil) {
+            this.stoppedHoldUntil[i] = 0;
+        }
+    }
+    isStoppedHoldActive(i) {
+        return Number(this.stoppedHoldUntil?.[i] || 0) > Date.now();
+    }
+    getEstimatedHomeKitPosition(i) {
+        const movementStart = this.movementStarts?.get(i);
+        if (!movementStart) {
+            return this.getCurrentHomeKitPosition(i);
+        }
+        const options = this.getWindowCoveringOptions(i);
+        const travelSeconds = Math.max(1, Number(options.travelSeconds || options.settleSeconds || 35));
+        const elapsed = Math.max(0, (Date.now() - movementStart.startedAt) / 1000);
+        const progress = (0, util_1.limit)(elapsed / travelSeconds, 0, 1);
+        const estimated = movementStart.startPosition + ((movementStart.targetPosition - movementStart.startPosition) * progress);
+        return this.toLimitedPosition(Math.round(estimated));
+    }
+    updateServiceStoppedAt(i, position) {
+        const service = this.getServiceForIndex(i);
+        const currentPosition = this.toLimitedPosition(position);
+        service.updateCharacteristic(this.Characteristic.CurrentPosition, currentPosition);
+        service.updateCharacteristic(this.Characteristic.TargetPosition, currentPosition);
+        service.updateCharacteristic(this.Characteristic.PositionState, this.Characteristic.PositionState.STOPPED);
+    }
 
     setLocalStoppedAtCurrentPosition(i, position) {
         const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
         const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
         const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
-        const currentPosition = this.toLimitedPosition(position ?? this.getCurrentHomeKitPosition(i));
+        const options = this.getWindowCoveringOptions(i);
+        const currentPosition = this.toLimitedPosition(position ?? (options.estimatePositionOnStop === false ? this.getCurrentHomeKitPosition(i) : this.getEstimatedHomeKitPosition(i)));
+        this.clearMovementStart(i);
+        this.markStoppedHold(i);
         if (!this.targetPosition) {
             this.targetPosition = {};
         }
         this.targetPosition[i] = currentPosition;
+        const rawCurrentPosition = this.homeKitPositionToRaw(currentPosition, i);
+        if (currentSchema) {
+            this.setStatusValue(currentSchema.code, rawCurrentPosition);
+        }
         if (targetSchema) {
-            this.setStatusValue(targetSchema.code, this.homeKitPositionToRaw(currentPosition, i));
+            this.setStatusValue(targetSchema.code, rawCurrentPosition);
         }
         if (!currentSchema && targetSchema) {
-            this.setStatusValue(targetSchema.code, this.homeKitPositionToRaw(currentPosition, i));
+            this.setStatusValue(targetSchema.code, rawCurrentPosition);
         }
         if (controlSchema) {
             this.setStatusValue(controlSchema.code, this.getStopCommandForControlSchema(controlSchema));
@@ -283,6 +343,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
     }
     async stopAtCurrentPosition(i, controlSchema, targetSchema, reason = 'tap') {
         this.clearExternalMovementTimer(i);
+        this.clearHomeKitMovementTimer(i);
         this.clearExternalMovementTarget(i);
         const currentPosition = this.setLocalStoppedAtCurrentPosition(i);
         const commands = [];
@@ -295,6 +356,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         if (commands.length) {
             await this.sendCommands(commands, false);
         }
+        this.setLocalStoppedAtCurrentPosition(i, currentPosition);
         await this.updateAllValues();
     }
     shouldStopOnTargetTap(i, targetPosition) {
@@ -320,6 +382,9 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             if (this.isControlStopped(controlStatus?.value)) {
                 return STOPPED;
             }
+        }
+        if (this.isStoppedHoldActive(i) && this.targetPosition?.[i] !== undefined) {
+            return STOPPED;
         }
         const externalTarget = this.getExternalMovementTarget(i);
         if (externalTarget !== undefined) {
@@ -371,6 +436,9 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         const service = this.getServiceForIndex(i);
         service.getCharacteristic(this.Characteristic.CurrentPosition)
             .onGet(() => {
+            if (this.isStoppedHoldActive(i) && this.targetPosition?.[i] !== undefined) {
+                return this.targetPosition[i];
+            }
             if (currentSchema) {
                 const status = this.getStatus(currentSchema.code);
                 return this.rawPositionToHomeKit(status?.value, i);
@@ -417,8 +485,11 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             const currentPosition = this.getCurrentHomeKitPosition(i);
             const options = this.getWindowCoveringOptions(i);
             const now = Date.now();
+            const endpointTap = targetPosition <= 5 || targetPosition >= 95;
+            const isPartial = this.isPartialHomeKitPosition(currentPosition);
+            const wasStopped = this.getPositionStateValue(i) === this.Characteristic.PositionState.STOPPED;
             if (this.shouldStopOnTargetTap(i, targetPosition)) {
-                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i] && targetPosition >= 95) {
+                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i] && endpointTap) {
                     targetPosition = 0;
                     this.partialOpenDoubleClickUntil[i] = 0;
                 }
@@ -431,17 +502,31 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             if (!this.partialOpenDoubleClickUntil) {
                 this.partialOpenDoubleClickUntil = {};
             }
-            if (currentPosition > 5 && currentPosition < 95 && targetPosition >= 95 && options.doubleClickToClose !== false) {
-                this.partialOpenDoubleClickUntil[i] = now + 900;
+            if (wasStopped && isPartial && endpointTap) {
+                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i]) {
+                    targetPosition = 0;
+                    this.partialOpenDoubleClickUntil[i] = 0;
+                }
+                else {
+                    targetPosition = 100;
+                    this.partialOpenDoubleClickUntil[i] = options.doubleClickToClose === false ? 0 : now + 650;
+                }
+            }
+            else if (isPartial && targetPosition >= 95 && options.doubleClickToClose !== false) {
+                this.partialOpenDoubleClickUntil[i] = now + 650;
             }
             else {
                 this.partialOpenDoubleClickUntil[i] = 0;
             }
+            this.clearStoppedHold(i);
             this.targetPosition[i] = targetPosition;
+            this.markMovementStart(i, currentPosition, targetPosition);
             this.markHomeKitCommandEchoWindow(i);
             this.clearExternalMovementTarget(i);
             this.clearExternalMovementTimer(i);
+            this.clearHomeKitMovementTimer(i);
             await this.sendCommands([{ code: schema.code, value: this.homeKitPositionToRaw(targetPosition, i) }], true);
+            this.scheduleHomeKitMovementSettle(i, targetPosition, 'homekit percent target');
         });
     }
     configureTargetPositionControl(i) {
@@ -472,8 +557,11 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             const currentPosition = this.getCurrentHomeKitPosition(i);
             const options = this.getWindowCoveringOptions(i);
             const now = Date.now();
+            const endpointTap = targetPosition <= 5 || targetPosition >= 95;
+            const isPartial = this.isPartialHomeKitPosition(currentPosition);
+            const wasStopped = this.getPositionStateValue(i) === this.Characteristic.PositionState.STOPPED;
             if (this.shouldStopOnTargetTap(i, targetPosition)) {
-                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i] && targetPosition >= 95) {
+                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i] && endpointTap) {
                     targetPosition = 0;
                     this.partialOpenDoubleClickUntil[i] = 0;
                 }
@@ -485,29 +573,110 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             if (!this.partialOpenDoubleClickUntil) {
                 this.partialOpenDoubleClickUntil = {};
             }
-            if (currentPosition > 5 && currentPosition < 95 && targetPosition >= 95 && options.doubleClickToClose !== false) {
-                this.partialOpenDoubleClickUntil[i] = now + 900;
+            if (wasStopped && isPartial && endpointTap) {
+                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i]) {
+                    targetPosition = 0;
+                    this.partialOpenDoubleClickUntil[i] = 0;
+                }
+                else {
+                    targetPosition = 100;
+                    this.partialOpenDoubleClickUntil[i] = options.doubleClickToClose === false ? 0 : now + 650;
+                }
+            }
+            else if (isPartial && targetPosition >= 95 && options.doubleClickToClose !== false) {
+                this.partialOpenDoubleClickUntil[i] = now + 650;
             }
             else {
                 this.partialOpenDoubleClickUntil[i] = 0;
             }
+            this.clearStoppedHold(i);
             this.targetPosition[i] = targetPosition;
+            this.markMovementStart(i, currentPosition, targetPosition);
             this.markHomeKitCommandEchoWindow(i);
             this.clearExternalMovementTarget(i);
             this.clearExternalMovementTimer(i);
+            this.clearHomeKitMovementTimer(i);
             const control = this.getControlCommand(targetPosition, i, isOldSchema);
             await this.sendCommands([{ code: schema.code, value: control }], true);
+            this.scheduleHomeKitMovementSettle(i, targetPosition, 'homekit control target');
         })
             .setProps({
             minStep: 50,
         });
     }
     removeLegacyStopSwitch(i) {
-        const subtype = `blind_stop_${SCHEMA_CODE[i].NAME}`;
-        const service = this.accessory.getServiceById(this.Service.Switch, subtype);
-        if (service) {
-            this.accessory.removeService(service);
+        const knownSubtypes = [`blind_stop_${SCHEMA_CODE[i].NAME}`, 'blind_stop', 'blind_stop_control', 'blind_stop_control_2'];
+        for (const subtype of knownSubtypes) {
+            const service = this.accessory.getServiceById(this.Service.Switch, subtype);
+            if (service) {
+                this.accessory.removeService(service);
+            }
         }
+        for (const service of [...this.accessory.services]) {
+            if (service.UUID !== this.Service.Switch.UUID) {
+                continue;
+            }
+            const displayName = String(service.displayName || service.getCharacteristic(this.Characteristic.Name)?.value || '').toLowerCase();
+            const subtype = String(service.subtype || '').toLowerCase();
+            if (displayName.includes('stop blind') || displayName.includes('stop curtain') || subtype.startsWith('blind_stop')) {
+                this.accessory.removeService(service);
+            }
+        }
+    }
+
+    clearHomeKitMovementTimer(i) {
+        if (!this.homeKitMovementTimers) {
+            return;
+        }
+        const timer = this.homeKitMovementTimers.get(i);
+        if (timer) {
+            clearTimeout(timer);
+            this.homeKitMovementTimers.delete(i);
+        }
+    }
+    scheduleHomeKitMovementSettle(i, targetPosition, reason = 'homekit target') {
+        if (!this.homeKitMovementTimers) {
+            this.homeKitMovementTimers = new Map();
+        }
+        this.clearHomeKitMovementTimer(i);
+        const delay = this.getWindowCoveringOptions(i).settleSeconds * 1000;
+        const timer = setTimeout(async () => {
+            this.homeKitMovementTimers?.delete(i);
+            try {
+                await this.settleHomeKitMovement(i, targetPosition, reason);
+            }
+            catch (error) {
+                this.log.warn('Failed to settle HomeKit window-covering movement: %s', error instanceof Error ? error.message : error);
+            }
+        }, delay);
+        this.homeKitMovementTimers.set(i, timer);
+    }
+    async settleHomeKitMovement(i, targetPosition, reason = 'homekit target') {
+        await this.refreshDeviceFromCloud();
+        const target = this.toLimitedPosition(targetPosition ?? this.targetPosition?.[i] ?? this.getEstimatedHomeKitPosition(i));
+        const currentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
+        const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
+        const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
+        const rawTarget = this.homeKitPositionToRaw(target, i);
+        if (currentSchema) {
+            this.setStatusValue(currentSchema.code, rawTarget);
+        }
+        if (targetSchema) {
+            this.setStatusValue(targetSchema.code, rawTarget);
+        }
+        if (controlSchema) {
+            const controlStatus = this.getStatus(controlSchema.code);
+            if (this.isControlMoving(controlStatus?.value)) {
+                this.setStatusValue(controlSchema.code, this.getStopCommandForControlSchema(controlSchema));
+            }
+        }
+        if (!this.targetPosition) {
+            this.targetPosition = {};
+        }
+        this.targetPosition[i] = target;
+        this.clearMovementStart(i);
+        this.updateServiceStoppedAt(i, target);
+        await this.updateAllValues();
     }
 
     clearExternalMovementTimer(i) {
@@ -597,6 +766,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 }
             }
             this.clearExternalMovementTarget(i);
+            this.clearMovementStart(i);
             await this.updateAllValues();
             return;
         }
