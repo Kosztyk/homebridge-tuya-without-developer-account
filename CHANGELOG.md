@@ -1,3 +1,9 @@
+## 1.0.34
+
+- Fixed HomeKit Names custom UI persistence for multi-gang devices.
+- Channel name overrides are now written directly to Homebridge config.json when ADD / UPDATE CHANNEL NAMES is clicked, avoiding Homebridge UI staging races that dropped switch_2/switch_3 or made the table empty after restart.
+- Added direct UI server endpoints for reading the Tuya platform config and saving/removing switch channel-name overrides.
+
 ## 1.0.33
 
 - Fixed HomeKit Names custom UI persistence so multiple gang/channel names for the same device survive Save Configuration, restart, and Homebridge UI re-render/configChanged events.

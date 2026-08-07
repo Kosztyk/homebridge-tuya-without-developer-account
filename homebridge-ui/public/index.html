@@ -968,6 +968,48 @@
     return override;
   }
 
+  function applyPlatformConfigFromServer(platformConfig) {
+    if (!platformConfig || typeof platformConfig !== 'object') {
+      return;
+    }
+    const existingUserCode = getUserCode();
+    currentConfig = normaliseConfig(platformConfig);
+    if (existingUserCode && !currentConfig.options.userCode) {
+      currentConfig.options.userCode = existingUserCode;
+    }
+    mergeDuplicateDeviceOverridesInUi();
+  }
+
+  async function loadPlatformConfigFromDisk() {
+    try {
+      const res = await homebridge.request('/config/platform', {});
+      if (res?.platformConfig) {
+        applyPlatformConfigFromServer(res.platformConfig);
+        return true;
+      }
+    } catch (e) {
+      // The normal Homebridge UI config remains the fallback.
+      console.warn('Could not load Tuya platform config from config.json:', e);
+    }
+    return false;
+  }
+
+  async function persistSwitchNamesToDisk(id, switchNames) {
+    const res = await homebridge.request('/config/switch-names/save', { id, switchNames });
+    if (res?.platformConfig) {
+      applyPlatformConfigFromServer(res.platformConfig);
+    }
+    return res;
+  }
+
+  async function removeSwitchNamesFromDisk(id) {
+    const res = await homebridge.request('/config/switch-names/remove', { id });
+    if (res?.platformConfig) {
+      applyPlatformConfigFromServer(res.platformConfig);
+    }
+    return res;
+  }
+
   function removeEmptyDeviceOverride(id) {
     const cfg = ensureConfig();
     const index = cfg.options.deviceOverrides.findIndex((item) => item && item.id === id);
@@ -1126,8 +1168,22 @@
       setSwitchStatus('Select a switch/outlet device first.', 'warning');
       return;
     }
+    const override = findDeviceOverride(result.id);
+    const switchNames = override?.switchNames || {};
     if (result.keys.length > 0) {
-      setSwitchStatus(`Explicit channel names staged for ${result.keys.length} channel(s): ${result.keys.join(', ')}. Click Save Configuration, then restart Homebridge.`, 'success');
+      try {
+        // Persist immediately to config.json as well as the Homebridge UI staging
+        // buffer. This avoids Homebridge UI re-render/native-save races that were
+        // dropping switch_2/switch_3 and making the table empty after restart.
+        await persistSwitchNamesToDisk(result.id, switchNames);
+        await pushCurrentConfigToHomebridge();
+        setSwitchStatus(`Explicit channel names saved for ${result.keys.length} channel(s): ${result.keys.join(', ')}. Restart Homebridge, then change the re-import token once if Apple Home still shows stale names.`, 'success');
+        homebridge.toast.success('Channel names were written to config.json.', 'Tuya');
+      } catch (e) {
+        setSwitchStatus(e.message || 'Failed to save channel names to config.json.', 'danger');
+        homebridge.toast.error(e.message || 'Failed to save channel names.', 'Tuya');
+        return;
+      }
     } else {
       setSwitchStatus('No explicit names entered. HomeKit-renamed services will still be preserved by the global option.', 'info');
     }
@@ -1149,10 +1205,17 @@
       delete override.switchNames;
       removeEmptyDeviceOverride(id);
     }
-    await syncConfigToUi();
+    try {
+      await removeSwitchNamesFromDisk(id);
+      await pushCurrentConfigToHomebridge();
+    } catch (e) {
+      setSwitchStatus(e.message || 'Failed to remove channel names from config.json.', 'danger');
+      return;
+    }
     markDirty();
+    renderSwitchNameOverrides();
     renderSwitchChannelEditor();
-    setSwitchStatus('Explicit channel-name overrides removed. Preserved HomeKit names will be used.', 'success');
+    setSwitchStatus('Explicit channel-name overrides removed from config.json. Preserved HomeKit names will be used.', 'success');
   }
 
   function getDeviceName(id) {
@@ -1653,6 +1716,9 @@
         options: { projectType: '3', deviceOverrides: [] },
       };
       currentConfig.options = currentConfig.options && typeof currentConfig.options === 'object' ? currentConfig.options : {};
+      // Read the platform block directly from config.json too. Homebridge UI's
+      // getPluginConfig() can be stale immediately after direct custom-UI writes.
+      await loadPlatformConfigFromDisk();
 
       // Important: restore saved values into the UI before normalising/staging config.
       // Otherwise the default unchecked checkbox can overwrite a saved true value.

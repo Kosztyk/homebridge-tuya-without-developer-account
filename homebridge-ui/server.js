@@ -5,6 +5,9 @@ const path = require('path');
 const qrcode = require('qrcode');
 const { default: TuyaHACloudAPI } = require('../dist/cloud/api/TuyaHACloudAPI');
 
+const PLATFORM_NAME = 'TuyaNoDeveloperAccount';
+
+
 function safeUserCode(userCode) {
   return String(userCode || '').replace(/[^a-zA-Z0-9_.-]/g, '_');
 }
@@ -303,7 +306,157 @@ function collectDevicesFromObject(root) {
       this.onRequest('/auth/clear', this.clearAuth.bind(this));
       this.onRequest('/auth/discover', this.discoverAuth.bind(this));
       this.onRequest('/devices/list', this.listDevices.bind(this));
+      this.onRequest('/config/platform', this.getPlatformConfigFromDisk.bind(this));
+      this.onRequest('/config/switch-names/save', this.saveSwitchNamesToDisk.bind(this));
+      this.onRequest('/config/switch-names/remove', this.removeSwitchNamesFromDisk.bind(this));
       this.ready();
+    }
+
+    getConfigFile() {
+      return path.join(this.homebridgeStoragePath, 'config.json');
+    }
+
+    async readHomebridgeConfigFile() {
+      const file = this.getConfigFile();
+      const raw = await fs.promises.readFile(file, 'utf8');
+      return JSON.parse(raw);
+    }
+
+    async writeHomebridgeConfigFile(config) {
+      const file = this.getConfigFile();
+      await fs.promises.writeFile(file, `${JSON.stringify(config, null, 4)}\n`, { mode: 0o600 });
+      return file;
+    }
+
+    findTuyaPlatformConfig(config, create = false) {
+      if (!config || typeof config !== 'object') {
+        throw new RequestError('Invalid Homebridge config.json.', { status: 500 });
+      }
+      if (!Array.isArray(config.platforms)) {
+        if (!create) return undefined;
+        config.platforms = [];
+      }
+      let platform = config.platforms.find((entry) => entry && entry.platform === PLATFORM_NAME);
+      if (!platform && create) {
+        platform = { platform: PLATFORM_NAME, name: 'Tuya without developer account', mode: 'cloud', options: { projectType: '3', deviceOverrides: [] } };
+        config.platforms.push(platform);
+      }
+      if (platform) {
+        platform.options = platform.options && typeof platform.options === 'object' ? platform.options : {};
+        platform.options.deviceOverrides = Array.isArray(platform.options.deviceOverrides) ? platform.options.deviceOverrides : [];
+      }
+      return platform;
+    }
+
+    normaliseSwitchNamesPayload(payload) {
+      const id = firstString(payload?.id);
+      if (!id) {
+        throw new RequestError('Device ID is required.', { status: 400 });
+      }
+      const input = payload?.switchNames;
+      if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        throw new RequestError('switchNames must be an object keyed by Tuya channel code.', { status: 400 });
+      }
+      const switchNames = {};
+      for (const [rawCode, rawName] of Object.entries(input)) {
+        const code = firstString(rawCode);
+        const name = firstString(rawName);
+        if (!code || !name) continue;
+        if (!/^switch(?:_\d+|_?usb_?\d+)?$/i.test(code)) {
+          // Only save real switch/outlet gang names here. This prevents blind/pet/AC
+          // settings from being mixed into the HomeKit Names section.
+          continue;
+        }
+        switchNames[code] = name;
+      }
+      if (!Object.keys(switchNames).length) {
+        throw new RequestError('At least one non-empty switch channel name is required.', { status: 400 });
+      }
+      return { id, switchNames };
+    }
+
+    mergeDuplicateOverrides(platform) {
+      const merged = [];
+      const byId = new Map();
+      for (const raw of platform.options.deviceOverrides || []) {
+        if (!raw || typeof raw !== 'object' || !firstString(raw.id)) continue;
+        const id = firstString(raw.id);
+        raw.id = id;
+        if (!byId.has(id)) {
+          byId.set(id, raw);
+          merged.push(raw);
+          continue;
+        }
+        const target = byId.get(id);
+        for (const [key, value] of Object.entries(raw)) {
+          if (key === 'id') continue;
+          if (value && typeof value === 'object' && !Array.isArray(value)
+              && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+            target[key] = { ...target[key], ...value };
+          } else {
+            target[key] = value;
+          }
+        }
+      }
+      platform.options.deviceOverrides = merged;
+    }
+
+    async getPlatformConfigFromDisk() {
+      try {
+        const config = await this.readHomebridgeConfigFile();
+        const platformConfig = this.findTuyaPlatformConfig(config, false);
+        return { platformConfig: platformConfig || null };
+      } catch (error) {
+        throw new RequestError(error.message || 'Failed to read Homebridge config.json.', { status: 500 });
+      }
+    }
+
+    async saveSwitchNamesToDisk(payload) {
+      const { id, switchNames } = this.normaliseSwitchNamesPayload(payload);
+      try {
+        const config = await this.readHomebridgeConfigFile();
+        const platform = this.findTuyaPlatformConfig(config, true);
+        this.mergeDuplicateOverrides(platform);
+        let override = platform.options.deviceOverrides.find((entry) => entry && entry.id === id);
+        if (!override) {
+          override = { id };
+          platform.options.deviceOverrides.push(override);
+        }
+        override.switchNames = { ...switchNames };
+        await this.writeHomebridgeConfigFile(config);
+        return { ok: true, id, switchNames: override.switchNames, platformConfig: platform };
+      } catch (error) {
+        if (error instanceof RequestError) throw error;
+        throw new RequestError(error.message || 'Failed to save channel names to config.json.', { status: 500 });
+      }
+    }
+
+    async removeSwitchNamesFromDisk(payload) {
+      const id = firstString(payload?.id);
+      if (!id) {
+        throw new RequestError('Device ID is required.', { status: 400 });
+      }
+      try {
+        const config = await this.readHomebridgeConfigFile();
+        const platform = this.findTuyaPlatformConfig(config, false);
+        if (!platform) {
+          return { ok: true, id, removed: false, platformConfig: null };
+        }
+        this.mergeDuplicateOverrides(platform);
+        let removed = false;
+        platform.options.deviceOverrides = platform.options.deviceOverrides.filter((entry) => {
+          if (!entry || entry.id !== id) return true;
+          delete entry.switchNames;
+          removed = true;
+          const keys = Object.keys(entry).filter((key) => key !== 'id' && entry[key] !== undefined && entry[key] !== null && entry[key] !== '');
+          return keys.length > 0;
+        });
+        await this.writeHomebridgeConfigFile(config);
+        return { ok: true, id, removed, platformConfig: platform };
+      } catch (error) {
+        if (error instanceof RequestError) throw error;
+        throw new RequestError(error.message || 'Failed to remove channel names from config.json.', { status: 500 });
+      }
     }
 
     getAuthFile(userCode) {
