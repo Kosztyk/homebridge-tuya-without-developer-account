@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const util_1 = require("../util/util");
 const BaseAccessory_1 = __importDefault(require("./BaseAccessory"));
+const Name_1 = require("./characteristic/Name");
 const SCHEMA_CODE = {
     CONTROL: ['control', 'mach_operate'],
     CURRENT_POSITION: ['percent_state'],
@@ -97,8 +98,12 @@ class BlindsAccessory extends BaseAccessory_1.default {
         return lowerValue === 'open' || lowerValue === 'close' || lowerValue === 'zz' || lowerValue === 'fz';
     }
     getService() {
-        return this.accessory.getService(this.Service.WindowCovering) ||
-            this.accessory.addService(this.Service.WindowCovering);
+        const service = this.accessory.getService(this.Service.WindowCovering) ||
+            this.accessory.addService(this.Service.WindowCovering, this.device?.name || 'Blind');
+        // Never expose the Tuya DP code (for example "control") as the HomeKit name.
+        // Apple Home reads the HAP service Name/ConfiguredName, not only the Homebridge UI card label.
+        (0, Name_1.configureName)(this, service, this.device?.name || 'Blind');
+        return service;
     }
     getCurrentHomeKitPosition() {
         const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_POSITION);

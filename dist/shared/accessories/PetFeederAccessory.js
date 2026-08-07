@@ -21,13 +21,23 @@ class PetFeederAccessory extends BaseAccessory_1.default {
         const config = this.device ? this.platform.getDeviceConfig(this.device) : undefined;
         const feeder = (config && typeof config.petFeeder === 'object') ? config.petFeeder : {};
         const manualFeedAmount = Number(feeder.manualFeedAmount);
+        const presentation = String(feeder.presentation || 'switch').trim().toLowerCase();
         return {
             manualFeedAmount: Number.isFinite(manualFeedAmount) ? Math.max(1, Math.min(12, Math.round(manualFeedAmount))) : 1,
             exposeSlowFeed: feeder.exposeSlowFeed !== false,
+            presentation: presentation === 'valve' ? 'valve' : 'switch',
         };
     }
     configureServices() {
-        this.configureFeedNowValve();
+        const { presentation } = this.getPetFeederConfig();
+        if (presentation === 'valve') {
+            this.configureFeedNowValve();
+            this.removeFeedNowSwitch();
+        }
+        else {
+            this.configureFeedNowSwitch();
+            this.removeFeedNowValve();
+        }
         this.configureQuickFeed();
         this.configureSlowFeed();
         this.configureFeedState();
@@ -66,6 +76,40 @@ class PetFeederAccessory extends BaseAccessory_1.default {
             return [{ code: quickSchema.code, value: true }];
         }
         return undefined;
+    }
+    async runFeedNow(service) {
+        const commands = this.getFeedNowCommand();
+        if (!commands) {
+            return;
+        }
+        await this.sendCommands(commands, true);
+        if (service?.UUID === this.Service.Switch.UUID) {
+            service.getCharacteristic(this.Characteristic.On).updateValue(true);
+            setTimeout(() => service.getCharacteristic(this.Characteristic.On).updateValue(false), 800);
+        }
+    }
+    configureFeedNowSwitch() {
+        const commands = this.getFeedNowCommand();
+        if (!commands) {
+            return;
+        }
+        const name = `${this.device?.name || 'Pet Feeder'} Feed Now`;
+        const service = this.accessory.getServiceById(this.Service.Switch, 'feed_now')
+            || this.accessory.addService(this.Service.Switch, name, 'feed_now');
+        (0, Name_1.configureName)(this, service, name);
+        service.getCharacteristic(this.Characteristic.On)
+            .onGet(() => {
+            this.checkOnlineStatus();
+            // Feed Now is a momentary action. Feeding state is exposed separately.
+            return false;
+        })
+            .onSet(async (value) => {
+            this.checkOnlineStatus();
+            if (value) {
+                await this.runFeedNow(service);
+            }
+            setTimeout(() => service.getCharacteristic(this.Characteristic.On).updateValue(false), 800);
+        });
     }
     configureFeedNowValve() {
         const commands = this.getFeedNowCommand();
@@ -160,6 +204,10 @@ class PetFeederAccessory extends BaseAccessory_1.default {
         const schema = this.getSchema(...SCHEMA_CODE.SLOW_FEED);
         const { exposeSlowFeed } = this.getPetFeederConfig();
         if (!exposeSlowFeed) {
+            const service = this.accessory.getServiceById(this.Service.Switch, 'slow_feed');
+            if (service) {
+                this.accessory.removeService(service);
+            }
             return;
         }
         this.configureBooleanSwitch(schema, `${this.device?.name || 'Pet Feeder'} Slow Feed`, 'slow_feed');
@@ -183,6 +231,20 @@ class PetFeederAccessory extends BaseAccessory_1.default {
         const service = this.accessory.getServiceById(this.Service.Switch, 'manual_feed');
         if (service) {
             this.log.warn(`Removing old pet feeder Manual Feed switch from cache: ${service.displayName}`);
+            this.accessory.removeService(service);
+        }
+    }
+    removeFeedNowValve() {
+        const service = this.accessory.getServiceById(this.Service.Valve, 'feed_now');
+        if (service) {
+            this.log.warn(`Removing pet feeder Feed Now valve because presentation is set to switch: ${service.displayName}`);
+            this.accessory.removeService(service);
+        }
+    }
+    removeFeedNowSwitch() {
+        const service = this.accessory.getServiceById(this.Service.Switch, 'feed_now');
+        if (service) {
+            this.log.warn(`Removing pet feeder Feed Now switch because presentation is set to valve: ${service.displayName}`);
             this.accessory.removeService(service);
         }
     }

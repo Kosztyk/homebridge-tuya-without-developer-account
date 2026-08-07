@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const util_1 = require("../util/util");
 const BaseAccessory_1 = __importDefault(require("./BaseAccessory"));
+const Name_1 = require("./characteristic/Name");
 const SCHEMA_CODE = [
     {
         NAME: 'control',
@@ -113,8 +114,14 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         return lowerValue === 'open' || lowerValue === 'close' || lowerValue === 'zz' || lowerValue === 'fz';
     }
     getServiceForIndex(i) {
-        return this.accessory.getService(SCHEMA_CODE[i].NAME) ||
-            this.accessory.addService(this.Service.WindowCovering, SCHEMA_CODE[i].NAME, SCHEMA_CODE[i].NAME);
+        const subtype = SCHEMA_CODE[i].NAME;
+        const defaultName = i === 0 ? (this.device?.name || 'Window Covering') : `${this.device?.name || 'Window Covering'} ${i + 1}`;
+        const service = this.accessory.getServiceById(this.Service.WindowCovering, subtype) ||
+            this.accessory.getService(subtype) ||
+            this.accessory.addService(this.Service.WindowCovering, defaultName, subtype);
+        // The HomeKit service name must be the user/device name, not the Tuya DP code (control/control_2).
+        (0, Name_1.configureName)(this, service, defaultName);
+        return service;
     }
     getExternalMovementTarget(i) {
         return this.externalMovementTargets?.get(i);

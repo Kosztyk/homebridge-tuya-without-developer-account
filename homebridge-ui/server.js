@@ -95,6 +95,80 @@ function looksLikePetFeeder(device) {
     || ['cwwsq'].includes(String(device.category || '').toLowerCase());
 }
 
+function normaliseNameForCompare(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/[^a-z0-9'\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function looksGeneratedChannelName(name, deviceName, subtype) {
+  const value = normaliseNameForCompare(name);
+  const device = normaliseNameForCompare(deviceName);
+  const sub = normaliseNameForCompare(subtype);
+  if (!value) return true;
+  if (/^(accessory information|battery|service)$/.test(value)) return true;
+  if (/^(switch|outlet|plug|channel|device)?\s*\d+$/.test(value)) return true;
+  if (sub && value === sub) return true;
+  const suffixMatch = String(subtype || '').match(/(?:switch|control|scene|relay|outlet|plug|usb)[_\s-]*(\d+|usb\d+)$/i);
+  const suffix = suffixMatch ? String(suffixMatch[1]).toLowerCase() : '';
+  if (suffix && (value === suffix || value === `switch ${suffix}` || value === `outlet ${suffix}` || value === `plug ${suffix}`)) return true;
+  if (device && suffix && value === `${device} ${suffix}`) return true;
+  return false;
+}
+
+function characteristicStringValue(characteristic) {
+  if (!characteristic || typeof characteristic !== 'object') return '';
+  const label = String(characteristic.displayName || characteristic.name || characteristic.type || characteristic.UUID || '').toLowerCase();
+  if (!label.includes('name') && !label.includes('configured')) return '';
+  return firstString(characteristic.value);
+}
+
+async function readCachedAccessoryServiceNames(homebridgeStoragePath) {
+  const files = [
+    path.join(homebridgeStoragePath, 'accessories', 'cachedAccessories'),
+    path.join(homebridgeStoragePath, 'accessories', 'cachedAccessories.json'),
+  ];
+  let parsed;
+  for (const file of files) {
+    try {
+      parsed = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+      break;
+    } catch {
+      // Try next possible cache path.
+    }
+  }
+  const entries = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.accessories) ? parsed.accessories : [];
+  const result = new Map();
+  for (const accessory of entries) {
+    if (!accessory || typeof accessory !== 'object') continue;
+    const deviceID = firstString(accessory.context?.deviceID, accessory.context?.deviceId, accessory.context?.id);
+    if (!deviceID || !Array.isArray(accessory.services)) continue;
+    const accessoryName = firstString(accessory.displayName, accessory.context?.deviceName, accessory.context?.name);
+    const names = result.get(deviceID) || {};
+    for (const service of accessory.services) {
+      if (!service || typeof service !== 'object') continue;
+      const subtype = firstString(service.subtype);
+      if (!subtype) continue;
+      const candidates = [];
+      candidates.push(firstString(service.displayName));
+      if (Array.isArray(service.characteristics)) {
+        for (const characteristic of service.characteristics) {
+          candidates.push(characteristicStringValue(characteristic));
+        }
+      }
+      const selected = candidates
+        .map((candidate) => firstString(candidate))
+        .find((candidate) => candidate && !looksGeneratedChannelName(candidate, accessoryName, subtype));
+      if (selected) names[subtype] = selected;
+    }
+    if (Object.keys(names).length) result.set(deviceID, names);
+  }
+  return result;
+}
+
 function collectDevicesFromObject(root) {
   const byId = new Map();
 
@@ -302,6 +376,14 @@ function collectDevicesFromObject(root) {
           }
         } catch (err) {
           errors.push({ file: candidate.file, message: err.message });
+        }
+      }
+
+      const cachedServiceNames = await readCachedAccessoryServiceNames(this.homebridgeStoragePath);
+      for (const [id, names] of cachedServiceNames.entries()) {
+        const device = allDevices.get(id);
+        if (device) {
+          device.homebridgeServiceNames = names;
         }
       }
 

@@ -274,3 +274,7 @@ Supported options:
 - `normal`: Tuya app Open = HomeKit Open. Default from v1.0.23.
 - `reversed`: Tuya app Open = HomeKit Closed.
 - `followReverseControl`: external state follows `reverseControl`.
+
+## Override isolation note
+
+From v1.0.28, special override settings are type-scoped at runtime and in the custom UI. A Pet Feeder override will not be applied to a blind or switch, a blind/window-covering override will not be applied to a pet feeder or AC, and AC temperature overrides will not be applied to non-AC devices.

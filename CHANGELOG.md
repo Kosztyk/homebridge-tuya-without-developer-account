@@ -1,3 +1,29 @@
+## 1.0.30
+
+- Fixes HomeKit names for blinds/window coverings so Tuya DP service names like `control` are never exposed as the Apple Home name.
+- Keeps Homebridge/explicit channel names authoritative for HomeKit service `Name` and `ConfiguredName`.
+- This is a focused naming fix only; no pet-feeder or blind-control behavior changes.
+
+# Changelog
+
+## 1.0.29
+
+- Fixed special override separation and duplicate override merging. Pet Feeder, Blind / Window Covering, AC temperature, and switch channel-name settings are now isolated to matching devices and duplicate entries for the same device are merged instead of ignored.
+- Added Pet Feeder HomeKit presentation option: Feed Now switch (default) or Valve-style Feed Now control. Apple Home does not provide a native Pet Feeder service type.
+- Homebridge UI now reads cached Homebridge accessory service names and auto-fills multi-channel switch/outlet name fields, so all channels can be pushed into Apple Home after saving and using a HomeKit name re-import token.
+- Tightened air-conditioner detection so generic DPs like mode/fan_speed no longer make unrelated devices appear as AC override candidates.
+
+## 1.0.28
+
+- Isolated special device overrides so Pet Feeder, Blind/Window Covering, Air Conditioner, and Switch Channel Name settings apply only to matching device types.
+- Blocks old or accidental Pet Feeder overrides from converting blinds/switches/ACs into pet feeders.
+- Blocks blind/window-covering overrides from applying to pet feeders, switches, ACs, or other unrelated devices.
+- Blocks AC temperature overrides from appearing on pet feeders, blinds, and switches.
+- Blocks switch channel-name overrides from applying to non-switch/non-outlet devices.
+- The custom UI now lists only matching device candidates in each special settings section.
+- The custom UI cleans misplaced special overrides from the staged config after loading detected devices; click Save Configuration to persist the cleanup.
+- Runtime startup also ignores misplaced special overrides even if an old config still contains them.
+
 
 ## 1.0.27
 
