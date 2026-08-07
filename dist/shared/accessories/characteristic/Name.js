@@ -56,6 +56,14 @@ function looksLikePluginGeneratedName(candidate, generatedName, accessory, servi
     if (!normalized) {
         return true;
     }
+    // Raw Tuya DP names and old internal service names must never be preserved as
+    // Apple Home names. They are implementation details, not user-facing names.
+    if (/^(control|control 2|control 3|mach operate|percent state|percent control|percent control 2|position|open|close|stop)$/.test(normalized)) {
+        return true;
+    }
+    if (/^(switch|outlet|plug|relay|channel|device|control)\s*\d+$/.test(normalized)) {
+        return true;
+    }
     if (generated && normalized === generated) {
         return true;
     }

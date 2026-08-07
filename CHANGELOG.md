@@ -1,3 +1,11 @@
+
+## 1.0.31
+
+- Fixed HomeKit naming regression where blinds/window coverings could appear as raw Tuya DP names like `control`.
+- Stopped the custom UI from automatically deleting/mutating staged Pet Feeder, Blind, AC, and HomeKit Names overrides on every device reload.
+- Added safer UI-side merging for duplicate `deviceOverrides` with the same device id so settings from different sections are preserved together.
+- HomeKit Names channel overrides are now staged without being removed by the misplaced-override cleanup warning.
+
 ## 1.0.30
 
 - Fixes HomeKit names for blinds/window coverings so Tuya DP service names like `control` are never exposed as the Apple Home name.

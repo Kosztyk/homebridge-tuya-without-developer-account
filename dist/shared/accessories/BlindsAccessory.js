@@ -102,7 +102,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.accessory.addService(this.Service.WindowCovering, this.device?.name || 'Blind');
         // Never expose the Tuya DP code (for example "control") as the HomeKit name.
         // Apple Home reads the HAP service Name/ConfiguredName, not only the Homebridge UI card label.
-        (0, Name_1.configureName)(this, service, this.device?.name || 'Blind');
+        (0, Name_1.configureName)(this, service, this.device?.name || 'Blind', { overrideName: this.device?.name || 'Blind' });
         return service;
     }
     getCurrentHomeKitPosition() {

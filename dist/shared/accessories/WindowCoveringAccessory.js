@@ -120,7 +120,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             this.accessory.getService(subtype) ||
             this.accessory.addService(this.Service.WindowCovering, defaultName, subtype);
         // The HomeKit service name must be the user/device name, not the Tuya DP code (control/control_2).
-        (0, Name_1.configureName)(this, service, defaultName);
+        (0, Name_1.configureName)(this, service, defaultName, { overrideName: defaultName });
         return service;
     }
     getExternalMovementTarget(i) {

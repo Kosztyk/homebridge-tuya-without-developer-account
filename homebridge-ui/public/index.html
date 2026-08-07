@@ -526,9 +526,7 @@
 
   async function syncConfigToUi() {
     ensureConfig();
-    if (Array.isArray(detectedDevices) && detectedDevices.length > 0) {
-      cleanupMixedOverridesUsingDetectedDevices();
-    }
+    mergeDuplicateDeviceOverridesInUi();
     await homebridge.updatePluginConfig([currentConfig]);
     renderAcOverrides();
     renderSwitchNameOverrides();
@@ -908,12 +906,45 @@
     markDirty();
   }
 
+  function mergeObjectDeep(target, source) {
+    for (const [key, value] of Object.entries(source || {})) {
+      if (key === 'id') continue;
+      if (value && typeof value === 'object' && !Array.isArray(value)
+          && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+        mergeObjectDeep(target[key], value);
+      } else {
+        target[key] = clone(value);
+      }
+    }
+    return target;
+  }
+
+  function mergeDuplicateDeviceOverridesInUi() {
+    const cfg = ensureConfig();
+    const merged = [];
+    const byId = new Map();
+    for (const item of cfg.options.deviceOverrides || []) {
+      if (!item || !String(item.id || '').trim()) continue;
+      const id = String(item.id).trim();
+      item.id = id;
+      if (!byId.has(id)) {
+        byId.set(id, item);
+        merged.push(item);
+      } else {
+        mergeObjectDeep(byId.get(id), item);
+      }
+    }
+    cfg.options.deviceOverrides = merged;
+  }
+
   function findDeviceOverride(id) {
+    mergeDuplicateDeviceOverridesInUi();
     const cfg = ensureConfig();
     return (cfg.options.deviceOverrides || []).find((item) => item && item.id === id);
   }
 
   function ensureDeviceOverride(id) {
+    mergeDuplicateDeviceOverridesInUi();
     const cfg = ensureConfig();
     let override = (cfg.options.deviceOverrides || []).find((item) => item && item.id === id);
     if (!override) {
@@ -1173,57 +1204,13 @@
   }
 
   function cleanupMixedOverridesUsingDetectedDevices() {
-    const cfg = ensureConfig();
-    if (!Array.isArray(cfg.options.deviceOverrides) || !Array.isArray(detectedDevices) || detectedDevices.length === 0) {
-      return { changed: false, removed: 0 };
-    }
-    let changed = false;
-    let removed = 0;
-    const repaired = [];
-    for (const original of cfg.options.deviceOverrides) {
-      if (!original || !original.id) {
-        continue;
-      }
-      const item = clone(original);
-      const device = detectedDevices.find((entry) => entry.id === item.id);
-      if (!device) {
-        repaired.push(item);
-        continue;
-      }
-      if ((item.petFeeder || String(item.category || '').toLowerCase() === 'cwwsq') && !isPetFeederDevice(device)) {
-        delete item.petFeeder;
-        if (String(item.category || '').toLowerCase() === 'cwwsq') delete item.category;
-        changed = true;
-        removed++;
-      }
-      if (item.windowCovering && !isWindowCoveringDevice(device)) {
-        delete item.windowCovering;
-        if (['cl', 'clkg'].includes(String(item.category || '').toLowerCase())) delete item.category;
-        changed = true;
-        removed++;
-      }
-      if (item.airConditioner && device.likelyAirConditioner !== true) {
-        delete item.airConditioner;
-        if (['kt', 'ktkzq'].includes(String(item.category || '').toLowerCase())) delete item.category;
-        changed = true;
-        removed++;
-      }
-      if (item.switchNames && getSwitchCodes(device).length === 0) {
-        delete item.switchNames;
-        changed = true;
-        removed++;
-      }
-      const meaningfulKeys = Object.keys(item).filter((key) => key !== 'id' && item[key] !== undefined && item[key] !== null && item[key] !== '');
-      if (meaningfulKeys.length > 0) {
-        repaired.push(item);
-      } else {
-        changed = true;
-      }
-    }
-    if (changed) {
-      cfg.options.deviceOverrides = repaired;
-    }
-    return { changed, removed };
+    // v1.0.31: do not mutate the staged Homebridge configuration automatically.
+    // The runtime already isolates misplaced special settings per real device type;
+    // the UI sections simply list matching candidates. Auto-cleaning was causing
+    // repeated warnings and made saved HomeKit Names/Pet Feeder/Blind settings
+    // appear to disappear before the user saved the config.
+    mergeDuplicateDeviceOverridesInUi();
+    return { changed: false, removed: 0 };
   }
 
   async function loadDetectedDevices(showToast = true) {
