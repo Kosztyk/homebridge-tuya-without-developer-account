@@ -1,3 +1,8 @@
+## 1.0.33
+
+- Fixed HomeKit Names custom UI persistence so multiple gang/channel names for the same device survive Save Configuration, restart, and Homebridge UI re-render/configChanged events.
+- The save path now harvests all visible switch_1/switch_2/switch_3 fields immediately before saving and prevents stale configChanged events from overwriting staged channel names.
+
 
 ## 1.0.32
 

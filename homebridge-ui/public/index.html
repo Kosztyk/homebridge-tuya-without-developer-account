@@ -411,6 +411,8 @@
   let pollTimer = null;
   let isAuthenticated = false;
   let isDirty = false;
+  let isSavingConfig = false;
+  let isUpdatingPluginConfig = false;
   let detectedDevices = [];
   let discoveredUserCode = '';
 
@@ -524,10 +526,22 @@
     return currentConfig;
   }
 
-  async function syncConfigToUi() {
+  async function pushCurrentConfigToHomebridge() {
     ensureConfig();
     mergeDuplicateDeviceOverridesInUi();
-    await homebridge.updatePluginConfig([currentConfig]);
+    isUpdatingPluginConfig = true;
+    try {
+      await homebridge.updatePluginConfig([currentConfig]);
+    } finally {
+      setTimeout(() => { isUpdatingPluginConfig = false; }, 0);
+    }
+  }
+
+  async function syncConfigToUi() {
+    // Preserve any channel-name values currently typed in the editor before any
+    // Homebridge UI re-render/configChanged event can occur.
+    collectVisibleSwitchNames();
+    await pushCurrentConfigToHomebridge();
     renderAcOverrides();
     renderSwitchNameOverrides();
     renderPetFeederOverrides();
@@ -1062,19 +1076,14 @@
     select.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  async function addOrUpdateSwitchNames() {
+
+  function collectVisibleSwitchNames() {
     const select = $('tuyaNodevSwitchDevice');
     const id = String(select?.value || '').trim();
     if (!id) {
-      setSwitchStatus('Select a switch/outlet device first.', 'warning');
-      return;
+      return { id: '', keys: [] };
     }
 
-    // Important: read every visible input before re-rendering or calling
-    // homebridge.updatePluginConfig(). Previous builds could lose switch_2 /
-    // switch_3 because the configChanged event re-rendered this editor while the
-    // staged values were still only in the DOM. Keep the values in currentConfig
-    // until the real Save Configuration click.
     const inputs = Array.from(document.querySelectorAll('.tuya-nodev-switch-name-input'));
     const switchNames = {};
     for (const input of inputs) {
@@ -1093,9 +1102,6 @@
         override.switchNames[key] = switchNames[key];
       }
 
-      // Also update the detected-device name cache used by this editor, so the
-      // current screen immediately shows the same staged names without waiting
-      // for Homebridge to write/read accessory cache.
       const device = detectedDevices.find((item) => item.id === id);
       if (device) {
         device.homebridgeServiceNames = device.homebridgeServiceNames && typeof device.homebridgeServiceNames === 'object'
@@ -1105,19 +1111,31 @@
           device.homebridgeServiceNames[key] = switchNames[key];
         }
       }
-
-      setSwitchStatus(`Explicit channel names staged for ${keys.length} channel(s): ${keys.join(', ')}. Click Save Configuration, then restart Homebridge.`, 'success');
-    } else {
+    } else if (inputs.length > 0) {
       delete override.switchNames;
       removeEmptyDeviceOverride(id);
-      setSwitchStatus('No explicit names entered. HomeKit-renamed services will still be preserved by the global option.', 'info');
     }
 
     mergeDuplicateDeviceOverridesInUi();
+    return { id, keys };
+  }
+
+  async function addOrUpdateSwitchNames() {
+    const result = collectVisibleSwitchNames();
+    if (!result.id) {
+      setSwitchStatus('Select a switch/outlet device first.', 'warning');
+      return;
+    }
+    if (result.keys.length > 0) {
+      setSwitchStatus(`Explicit channel names staged for ${result.keys.length} channel(s): ${result.keys.join(', ')}. Click Save Configuration, then restart Homebridge.`, 'success');
+    } else {
+      setSwitchStatus('No explicit names entered. HomeKit-renamed services will still be preserved by the global option.', 'info');
+    }
     markDirty();
     renderSwitchNameOverrides();
     renderSwitchChannelEditor();
-    if (select) select.value = id;
+    const select = $('tuyaNodevSwitchDevice');
+    if (select) select.value = result.id;
   }
 
   async function removeSelectedSwitchNames() {
@@ -1273,6 +1291,7 @@
       setAcStatus(e.message || 'Failed to load detected devices.', 'danger');
       if (showToast) homebridge.toast.error(e.message || 'Failed to load detected devices.', 'Tuya');
     } finally {
+      isSavingConfig = false;
       homebridge.hideSpinner();
     }
   }
@@ -1458,6 +1477,7 @@
       setStatus(e.message || 'Failed to generate QR code.', 'danger');
       homebridge.toast.error(e.message || 'Failed to generate QR code.', 'Tuya');
     } finally {
+      isSavingConfig = false;
       homebridge.hideSpinner();
     }
   }
@@ -1565,8 +1585,11 @@
       homebridge.showSpinner();
       $('tuyaNodevSave').disabled = true;
 
+      // Final harvest of all visible channel-name inputs before saving.
+      collectVisibleSwitchNames();
+      isSavingConfig = true;
       await withTimeout(
-        syncConfigToUi(),
+        pushCurrentConfigToHomebridge(),
         8000,
         'Timed out while preparing the plugin configuration for saving.'
       );
@@ -1612,6 +1635,7 @@
       setStatus(e.message || 'Failed to save configuration.', 'danger');
       homebridge.toast.error(e.message || 'Failed to save configuration.', 'Tuya');
     } finally {
+      isSavingConfig = false;
       homebridge.hideSpinner();
       if (isAuthenticated || isDirty) {
         $('tuyaNodevSave').disabled = false;
@@ -1645,6 +1669,9 @@
         const data = event.data;
         const block = Array.isArray(data) ? data[0] : data;
         if (block && typeof block === 'object') {
+          if (isSavingConfig || isUpdatingPluginConfig || isDirty) {
+            return;
+          }
           currentConfig = block;
           currentConfig.options = currentConfig.options && typeof currentConfig.options === 'object' ? currentConfig.options : {};
 
