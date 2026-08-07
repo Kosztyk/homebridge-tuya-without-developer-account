@@ -59,6 +59,13 @@ class TuyaPlatform {
     this.options.syncHomebridgeNamesToHomeKit = typeof this.options.syncHomebridgeNamesToHomeKit === 'boolean'
       ? this.options.syncHomebridgeNamesToHomeKit
       : true;
+    // Optional one-time HomeKit identity bump. Apple Home can keep old per-service
+    // names (for example Bathroom 1/2/3) in the controller cache even after the
+    // plugin updates Name/ConfiguredName. Setting this token changes the HAP UUID
+    // for Tuya accessories, so Apple Home imports them as fresh accessories using
+    // the names currently stored in Homebridge's cached services. Change the token
+    // only when you intentionally want a HomeKit re-import/name migration.
+    this.options.homeKitNameReimportToken = String(this.options.homeKitNameReimportToken || '').trim();
 
     if (!this.options.userCode || String(this.options.userCode).trim().length === 0) {
       this.log.error("[Tuya QR] Missing Tuya User Code. Open Homebridge UI → Plugins → Tuya without developer account for Homebridge → Settings, generate/scan the QR code, then save.");
@@ -577,6 +584,90 @@ class TuyaPlatform {
     return schemaConfig;
   }
 
+  getHomeKitUUID(device) {
+    const token = String(this.options.homeKitNameReimportToken || '').trim();
+    const seed = token ? `${device.id}:homekit-name-reimport:${token}` : device.id;
+    return this.api.hap.uuid.generate(seed);
+  }
+
+  getLegacyHomeKitUUID(device) {
+    return this.api.hap.uuid.generate(device.id);
+  }
+
+  findCachedAccessoryForDevice(device, preferredUUID) {
+    return this.cachedAccessories.find(accessory => accessory.UUID === preferredUUID)
+      || this.cachedAccessories.find(accessory => accessory.context?.deviceID === device.id)
+      || this.cachedAccessories.find(accessory => accessory.UUID === this.getLegacyHomeKitUUID(device));
+  }
+
+  isGeneratedServiceName(name, device, service) {
+    const raw = String(name || '').trim();
+    if (!raw) {
+      return true;
+    }
+    const normalized = raw.toLowerCase().replace(/[_-]+/g, ' ').replace(/[^a-z0-9'\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const deviceName = String(device?.name || '').toLowerCase().replace(/[_-]+/g, ' ').replace(/[^a-z0-9'\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const subtype = String(service?.subtype || '').toLowerCase().replace(/[_-]+/g, ' ').replace(/[^a-z0-9'\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return true;
+    }
+    if (/^(accessory information|battery|service)$/.test(normalized)) {
+      return true;
+    }
+    if (/^(switch|outlet|plug|relay|channel|device)?\s*\d+$/.test(normalized)) {
+      return true;
+    }
+    if (subtype && normalized === subtype) {
+      return true;
+    }
+    const suffixMatch = String(service?.subtype || '').match(/(?:switch|control|scene|relay|outlet|plug|usb)[_\s-]*(\d+|usb\d+)$/i);
+    const suffix = suffixMatch ? String(suffixMatch[1]).toLowerCase() : '';
+    if (suffix && (normalized === suffix || normalized === `switch ${suffix}` || normalized === `outlet ${suffix}` || normalized === `plug ${suffix}`)) {
+      return true;
+    }
+    if (deviceName && suffix && normalized === `${deviceName} ${suffix}`) {
+      return true;
+    }
+    return false;
+  }
+
+  extractCachedServiceNames(device, cachedAccessory) {
+    const names = {};
+    if (!cachedAccessory || !Array.isArray(cachedAccessory.services)) {
+      return names;
+    }
+    const skipUUIDs = new Set([this.Service.AccessoryInformation.UUID, this.Service.Battery.UUID]);
+    for (const service of cachedAccessory.services) {
+      if (!service || skipUUIDs.has(service.UUID)) {
+        continue;
+      }
+      const subtypeKey = String(service.subtype || service.displayName || service.UUID);
+      const candidates = [];
+      if (typeof service.displayName === 'string') {
+        candidates.push(service.displayName);
+      }
+      for (const characteristicType of [this.Characteristic.ConfiguredName, this.Characteristic.Name]) {
+        try {
+          if (service.testCharacteristic(characteristicType)) {
+            const value = service.getCharacteristic(characteristicType).value;
+            if (typeof value === 'string') {
+              candidates.push(value);
+            }
+          }
+        } catch {
+          // Ignore malformed cached characteristics.
+        }
+      }
+      const selected = candidates
+        .map(value => sanitizeName(String(value || '').trim()) ?? String(value || '').trim())
+        .find(value => value && !this.isGeneratedServiceName(value, device, service));
+      if (selected) {
+        names[subtypeKey] = selected;
+      }
+    }
+    return names;
+  }
+
   addAccessory(device) {
     const deviceConfig = this.getDeviceConfig(device);
     if (deviceConfig?.category) {
@@ -591,8 +682,13 @@ class TuyaPlatform {
       this.log.info("Hide Accessory:", device.name);
       return;
     }
-    const uuid = this.api.hap.uuid.generate(device.id);
+    const uuid = this.getHomeKitUUID(device);
     const existingAccessory = this.cachedAccessories.find(accessory => accessory.UUID === uuid);
+    const legacyAccessory = existingAccessory ? undefined : this.findCachedAccessoryForDevice(device, uuid);
+    const migratedServiceNames = legacyAccessory ? this.extractCachedServiceNames(device, legacyAccessory) : {};
+    if (Object.keys(migratedServiceNames).length > 0) {
+      this.log.info(`[Tuya QR] Found ${Object.keys(migratedServiceNames).length} cached Homebridge service name(s) for ${device.name}; will use them for HomeKit re-import.`);
+    }
     if (existingAccessory && !device.unbridged) {
       this.log.info("Restoring existing accessory from cache:", existingAccessory.displayName);
       if (!existingAccessory.context || !existingAccessory.context.deviceID) {
@@ -611,6 +707,10 @@ class TuyaPlatform {
       const safeName = sanitizeName(device.name) ?? (device.id || "Tuya Device");
       const accessory = new this.api.platformAccessory(safeName, uuid);
       accessory.context.deviceID = device.id;
+      if (Object.keys(migratedServiceNames).length > 0) {
+        accessory.context.homebridgeServiceNames = { ...migratedServiceNames };
+        accessory.context.homeKitServiceNames = { ...migratedServiceNames };
+      }
       const handler = AccessoryFactory.createAccessory(this, accessory, device);
       this.accessoryHandlers.push(handler);
       if (device.unbridged) {
@@ -619,6 +719,18 @@ class TuyaPlatform {
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       }
       AccessoryFactory.configAccessory(this, accessory);
+      if (legacyAccessory && legacyAccessory.UUID !== accessory.UUID && !device.unbridged) {
+        this.log.warn(`[Tuya QR] Removing old cached HomeKit identity for ${device.name} after name re-import.`);
+        try {
+          this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [legacyAccessory]);
+        } catch (error) {
+          this.log.debug(`Failed to unregister old HomeKit identity for ${device.name}:`, error);
+        }
+        const legacyIndex = this.cachedAccessories.indexOf(legacyAccessory);
+        if (legacyIndex >= 0) {
+          this.cachedAccessories.splice(legacyIndex, 1);
+        }
+      }
     }
   }
 

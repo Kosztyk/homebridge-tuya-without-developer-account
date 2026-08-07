@@ -419,6 +419,12 @@
                 "mqtt"
               ]
             }
+          },
+          "homeKitNameReimportToken": {
+            "type": "string",
+            "title": "HomeKit name re-import token",
+            "description": "Advanced. Apple Home can keep old cached service names such as Bathroom 1/2/3. Set or change this token once to force Tuya accessories to be re-imported into HomeKit using the service names currently shown in Homebridge Accessories. Leave blank normally. Changing it will make Apple Home see the accessories as new and may require moving them back to rooms/favorites/automations.",
+            "default": ""
           }
         }
       }
@@ -440,6 +446,8 @@
         "options.homeWhitelist",
         "options.enableAdaptiveLighting",
         "options.preserveHomeKitNames",
+        "options.homeKitNameReimportToken",
+        "options.syncHomebridgeNamesToHomeKit",
         "options.deviceOverrides",
         "options.debug",
         "options.debugLevel"

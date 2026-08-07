@@ -143,6 +143,12 @@
   <small class="form-text text-muted">When enabled, the plugin pushes the names shown in Homebridge Accessories into HomeKit Name and ConfiguredName for all services on every restart. Explicit channel names still take priority.</small>
 
   <div class="form-group mt-3">
+    <label for="tuyaNodevHomeKitNameReimportToken">HomeKit name re-import token</label>
+    <input id="tuyaNodevHomeKitNameReimportToken" class="form-control" type="text" placeholder="Leave blank normally, or enter names-v1 to force re-import">
+    <small class="form-text text-muted">Use only when Apple Home keeps stale names like Bathroom 1/2/3. Change this token once, save, and restart Homebridge. Apple Home will see Tuya accessories as new, so you may need to move them back to rooms/favorites/automations.</small>
+  </div>
+
+  <div class="form-group mt-3">
     <label for="tuyaNodevSwitchDevice">Select multi-switch / outlet device</label>
     <select id="tuyaNodevSwitchDevice" class="form-control">
       <option value="">Load devices first...</option>
@@ -489,6 +495,7 @@
     cfg.options.enableAdaptiveLighting = $('tuyaNodevAdaptiveLighting')?.checked === true;
     cfg.options.preserveHomeKitNames = $('tuyaNodevPreserveNames')?.checked !== false;
     cfg.options.syncHomebridgeNamesToHomeKit = $('tuyaNodevSyncHomebridgeNames')?.checked !== false;
+    cfg.options.homeKitNameReimportToken = ($('tuyaNodevHomeKitNameReimportToken')?.value || '').trim();
     if (!Array.isArray(cfg.options.deviceOverrides)) {
       cfg.options.deviceOverrides = [];
     }
@@ -1504,6 +1511,7 @@
       $('tuyaNodevAdaptiveLighting').checked = currentConfig.options?.enableAdaptiveLighting === true;
       $('tuyaNodevPreserveNames').checked = currentConfig.options?.preserveHomeKitNames !== false;
       $('tuyaNodevSyncHomebridgeNames').checked = currentConfig.options?.syncHomebridgeNamesToHomeKit !== false;
+      if ($('tuyaNodevHomeKitNameReimportToken')) { $('tuyaNodevHomeKitNameReimportToken').value = currentConfig.options?.homeKitNameReimportToken || ''; }
       ensureConfig();
 
       if (homebridge.showSchemaForm) homebridge.showSchemaForm();
@@ -1521,6 +1529,7 @@
           $('tuyaNodevAdaptiveLighting').checked = block.options?.enableAdaptiveLighting === true;
           $('tuyaNodevPreserveNames').checked = block.options?.preserveHomeKitNames !== false;
           $('tuyaNodevSyncHomebridgeNames').checked = block.options?.syncHomebridgeNamesToHomeKit !== false;
+          if ($('tuyaNodevHomeKitNameReimportToken')) { $('tuyaNodevHomeKitNameReimportToken').value = block.options?.homeKitNameReimportToken || ''; }
           ensureConfig();
           renderAcOverrides();
           renderSwitchNameOverrides();

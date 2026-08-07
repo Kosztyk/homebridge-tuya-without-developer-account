@@ -1,3 +1,10 @@
+
+## 1.0.27
+
+- Added HomeKit name re-import token for cases where Apple Home keeps stale cached service names such as Bathroom 1/2/3 even though Homebridge shows Bathroom Ceiling / Bathroom Vent / Bathroom Mirror.
+- When the token is set, Tuya accessories get a new HomeKit identity and the plugin migrates non-generic service names from the old Homebridge cache into the new HomeKit services.
+- Added UI field under HomeKit Names for the re-import token. Leave it blank normally; change it only when forcing Apple Home to import names again.
+
 # Changelog
 
 ## 1.0.26

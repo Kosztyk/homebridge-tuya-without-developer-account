@@ -595,3 +595,10 @@ Advanced `externalControlStateMode` values:
 - `normal` — default from v1.0.23. Tuya app `open` means HomeKit open.
 - `reversed` — Tuya app `open` means HomeKit closed.
 - `followReverseControl` — Tuya-app state follows `reverseControl`; kept for unusual motors.
+
+
+### Forcing Apple Home to re-import Homebridge names
+
+Apple Home may keep old controller-side names for bridged services, such as `Bathroom 1`, `Bathroom 2`, and `Bathroom 3`, even after Homebridge shows edited names like `Bathroom Ceiling`, `Bathroom Vent`, and `Bathroom Mirror`. If normal name sync does not update Apple Home, set **HomeKit name re-import token** in the plugin UI to a new value such as `names-v1`, save, and restart Homebridge.
+
+Changing this token intentionally gives Tuya accessories a new HomeKit identity and migrates the non-generic service names from the old Homebridge cache into the recreated services. Apple Home may treat them as new accessories, so rooms, favorites, and automations may need to be checked afterwards. Leave the token blank during normal use.
