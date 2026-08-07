@@ -1,10 +1,10 @@
 
-## 1.0.31
+## 1.0.32
 
-- Fixed HomeKit naming regression where blinds/window coverings could appear as raw Tuya DP names like `control`.
-- Stopped the custom UI from automatically deleting/mutating staged Pet Feeder, Blind, AC, and HomeKit Names overrides on every device reload.
-- Added safer UI-side merging for duplicate `deviceOverrides` with the same device id so settings from different sections are preserved together.
-- HomeKit Names channel overrides are now staged without being removed by the misplaced-override cleanup warning.
+- Fixed the HomeKit Names editor so saving more than one channel/gang for the same Tuya device keeps every entered name, for example `switch_1`, `switch_2`, and `switch_3`.
+- The Add / Update Channel Names button now stages channel names locally and avoids the Homebridge `configChanged` re-render that could drop later gang names before Save Configuration.
+- The HomeKit Names table now refreshes from the staged config immediately, so all saved channel names remain visible before final save/restart.
+- Keeps the v1.0.31 fixes that stopped automatic staged-config cleanup warnings and blind names like `control`.
 
 ## 1.0.30
 

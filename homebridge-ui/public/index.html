@@ -1063,30 +1063,61 @@
   }
 
   async function addOrUpdateSwitchNames() {
-    const id = $('tuyaNodevSwitchDevice')?.value || '';
+    const select = $('tuyaNodevSwitchDevice');
+    const id = String(select?.value || '').trim();
     if (!id) {
       setSwitchStatus('Select a switch/outlet device first.', 'warning');
       return;
     }
+
+    // Important: read every visible input before re-rendering or calling
+    // homebridge.updatePluginConfig(). Previous builds could lose switch_2 /
+    // switch_3 because the configChanged event re-rendered this editor while the
+    // staged values were still only in the DOM. Keep the values in currentConfig
+    // until the real Save Configuration click.
     const inputs = Array.from(document.querySelectorAll('.tuya-nodev-switch-name-input'));
     const switchNames = {};
     for (const input of inputs) {
       const code = String(input.getAttribute('data-code') || '').trim();
       const value = String(input.value || '').trim();
-      if (code && value) switchNames[code] = value;
+      if (code && value) {
+        switchNames[code] = value;
+      }
     }
+
     const override = ensureDeviceOverride(id);
-    if (Object.keys(switchNames).length > 0) {
-      override.switchNames = switchNames;
-      setSwitchStatus('Explicit channel names staged. Click Save Configuration, then restart Homebridge.', 'success');
+    const keys = Object.keys(switchNames).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (keys.length > 0) {
+      override.switchNames = {};
+      for (const key of keys) {
+        override.switchNames[key] = switchNames[key];
+      }
+
+      // Also update the detected-device name cache used by this editor, so the
+      // current screen immediately shows the same staged names without waiting
+      // for Homebridge to write/read accessory cache.
+      const device = detectedDevices.find((item) => item.id === id);
+      if (device) {
+        device.homebridgeServiceNames = device.homebridgeServiceNames && typeof device.homebridgeServiceNames === 'object'
+          ? device.homebridgeServiceNames
+          : {};
+        for (const key of keys) {
+          device.homebridgeServiceNames[key] = switchNames[key];
+        }
+      }
+
+      setSwitchStatus(`Explicit channel names staged for ${keys.length} channel(s): ${keys.join(', ')}. Click Save Configuration, then restart Homebridge.`, 'success');
     } else {
       delete override.switchNames;
       removeEmptyDeviceOverride(id);
       setSwitchStatus('No explicit names entered. HomeKit-renamed services will still be preserved by the global option.', 'info');
     }
-    await syncConfigToUi();
+
+    mergeDuplicateDeviceOverridesInUi();
     markDirty();
+    renderSwitchNameOverrides();
     renderSwitchChannelEditor();
+    if (select) select.value = id;
   }
 
   async function removeSelectedSwitchNames() {
@@ -1204,7 +1235,7 @@
   }
 
   function cleanupMixedOverridesUsingDetectedDevices() {
-    // v1.0.31: do not mutate the staged Homebridge configuration automatically.
+    // v1.0.32: do not mutate the staged Homebridge configuration automatically.
     // The runtime already isolates misplaced special settings per real device type;
     // the UI sections simply list matching candidates. Auto-cleaning was causing
     // repeated warnings and made saved HomeKit Names/Pet Feeder/Blind settings
