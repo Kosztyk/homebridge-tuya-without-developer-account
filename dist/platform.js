@@ -547,6 +547,151 @@ class TuyaPlatform {
     return devices;
   }
 
+  getDeviceCodes(device) {
+    const codes = [];
+    for (const source of [device?.schema, device?.status]) {
+      if (!Array.isArray(source)) {
+        continue;
+      }
+      for (const item of source) {
+        const code = String(item?.code || '').trim().toLowerCase();
+        if (code) {
+          codes.push(code);
+        }
+      }
+    }
+    return Array.from(new Set(codes));
+  }
+
+  getDeviceText(device) {
+    return [
+      device?.name,
+      device?.category,
+      device?.product_name,
+      device?.productName,
+      device?.product_id,
+      device?.productId,
+      device?.model,
+    ].filter(Boolean).join(' ').toLowerCase();
+  }
+
+  isPetFeederLikeDevice(device) {
+    const category = String(device?.category || '').toLowerCase();
+    const codes = this.getDeviceCodes(device);
+    const text = this.getDeviceText(device);
+    return category === 'cwwsq'
+      || ['quick_feed', 'manual_feed', 'slow_feed', 'meal_plan', 'feed_state'].some(code => codes.includes(code))
+      || ['pet feeder', 'feeder', 'cat feeder', 'dog feeder', 'food dispenser'].some(term => text.includes(term));
+  }
+
+  isWindowCoveringLikeDevice(device) {
+    const category = String(device?.category || '').toLowerCase();
+    const codes = this.getDeviceCodes(device);
+    const text = this.getDeviceText(device);
+    const hasKnownCategory = ['cl', 'clkg', 'mg', 'mgmt'].includes(category);
+    const hasNameHint = ['blind', 'blinds', 'curtain', 'shade', 'shutter', 'window covering', 'roller', 'jaluzea', 'draperie', 'perdea'].some(term => text.includes(term));
+    const hasWindowControl = ['control', 'control_2', 'mach_operate'].some(code => codes.includes(code));
+    const hasWindowPercent = ['percent_state', 'percent_control', 'percent_control_2', 'position'].some(code => codes.includes(code));
+    return hasKnownCategory || hasNameHint || (hasWindowControl && hasWindowPercent);
+  }
+
+  isAirConditionerLikeDevice(device) {
+    const category = String(device?.category || '').toLowerCase();
+    const codes = this.getDeviceCodes(device);
+    const text = this.getDeviceText(device);
+    return ['kt', 'ktkzq', 'air_conditioner', 'airconditioner'].includes(category)
+      || ['air conditioner', 'airconditioner', 'aircon', 'a/c', 'ac ', ' ac', 'clima', 'climă', 'aer conditionat', 'aer condiționat', 'hvac'].some(term => text.includes(term))
+      || ['temp_set', 'temp_current', 'mode', 'fan_speed', 'temp_set_f', 'temp_current_f'].some(code => codes.includes(code));
+  }
+
+  isSwitchLikeDevice(device) {
+    const category = String(device?.category || '').toLowerCase();
+    const codes = this.getDeviceCodes(device);
+    return ['dlq', 'kg', 'tdq', 'qjdcz', 'szjqr', 'cz', 'pc', 'wkcz'].includes(category)
+      || codes.some(code => /^switch(_\d+|_usb\d+)?$/i.test(code));
+  }
+
+  warnOverrideIsolationOnce(id, message) {
+    if (!this.overrideIsolationWarnings) {
+      this.overrideIsolationWarnings = new Set();
+    }
+    const key = `${id}:${message}`;
+    if (this.overrideIsolationWarnings.has(key)) {
+      return;
+    }
+    this.overrideIsolationWarnings.add(key);
+    this.log.warn(message);
+  }
+
+  isolateDeviceConfigForDevice(device, config) {
+    if (!config) {
+      return undefined;
+    }
+    const scoped = JSON.parse(JSON.stringify(config));
+    const id = String(scoped.id || device?.id || '').trim();
+
+    // "global" is only for harmless global/name/schema style options. Never let a
+    // global override force every device into Pet Feeder, Blind, AC, or Switch naming.
+    if (id === 'global') {
+      delete scoped.category;
+      delete scoped.petFeeder;
+      delete scoped.windowCovering;
+      delete scoped.airConditioner;
+      delete scoped.switchNames;
+      return scoped;
+    }
+
+    const category = String(scoped.category || '').toLowerCase();
+    const petLike = this.isPetFeederLikeDevice(device);
+    const coverLike = this.isWindowCoveringLikeDevice(device);
+    const acLike = this.isAirConditionerLikeDevice(device);
+    const switchLike = this.isSwitchLikeDevice(device);
+
+    if ((scoped.petFeeder || category === 'cwwsq') && !petLike) {
+      this.warnOverrideIsolationOnce(id, `[Tuya QR] Ignoring Pet Feeder override for ${device?.name || id}; the detected Tuya device is not a pet feeder and does not expose pet-feeder DPs.`);
+      delete scoped.petFeeder;
+      if (category === 'cwwsq') {
+        delete scoped.category;
+      }
+    }
+
+    if (scoped.windowCovering && !coverLike) {
+      this.warnOverrideIsolationOnce(id, `[Tuya QR] Ignoring blind/window-covering override for ${device?.name || id}; the detected Tuya device is not a blind/curtain/shade.`);
+      delete scoped.windowCovering;
+      if (['cl', 'clkg'].includes(category)) {
+        delete scoped.category;
+      }
+    }
+
+    if (scoped.airConditioner && !acLike) {
+      this.warnOverrideIsolationOnce(id, `[Tuya QR] Ignoring air-conditioner override for ${device?.name || id}; the detected Tuya device is not an air conditioner.`);
+      delete scoped.airConditioner;
+      if (['kt', 'ktkzq'].includes(category)) {
+        delete scoped.category;
+      }
+    }
+
+    if (scoped.switchNames && !switchLike) {
+      this.warnOverrideIsolationOnce(id, `[Tuya QR] Ignoring switch channel-name override for ${device?.name || id}; the detected Tuya device is not a switch/outlet with Tuya switch DPs.`);
+      delete scoped.switchNames;
+    }
+
+    // Do not let a category override switch an unrelated device into a special
+    // handler. This protects against UI/old-config mistakes such as blinds showing
+    // as Pet Feeder or pet feeders showing in blind settings.
+    if (category === 'cwwsq' && !petLike) {
+      delete scoped.category;
+    }
+    if (['cl', 'clkg'].includes(category) && !coverLike) {
+      delete scoped.category;
+    }
+    if (['kt', 'ktkzq'].includes(category) && !acLike) {
+      delete scoped.category;
+    }
+
+    return scoped;
+  }
+
   getDeviceConfig(device) {
     if (!this.options.deviceOverrides) {
       return undefined;
@@ -555,9 +700,10 @@ class TuyaPlatform {
       const idMatch = config.id === device.id || config.id === device.uuid || config.id === device.product_id || config.id === "global";
       return idMatch;
     });
-    return matches.find(config => config.id === device.id || config.id === device.uuid) ||
+    const config = matches.find(config => config.id === device.id || config.id === device.uuid) ||
       matches.find(config => config.id === device.product_id) ||
       matches.find(config => config.id === "global");
+    return this.isolateDeviceConfigForDevice(device, config);
   }
 
   getDeviceSchemaConfig(device, code) {

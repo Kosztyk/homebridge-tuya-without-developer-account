@@ -602,3 +602,7 @@ Advanced `externalControlStateMode` values:
 Apple Home may keep old controller-side names for bridged services, such as `Bathroom 1`, `Bathroom 2`, and `Bathroom 3`, even after Homebridge shows edited names like `Bathroom Ceiling`, `Bathroom Vent`, and `Bathroom Mirror`. If normal name sync does not update Apple Home, set **HomeKit name re-import token** in the plugin UI to a new value such as `names-v1`, save, and restart Homebridge.
 
 Changing this token intentionally gives Tuya accessories a new HomeKit identity and migrates the non-generic service names from the old Homebridge cache into the recreated services. Apple Home may treat them as new accessories, so rooms, favorites, and automations may need to be checked afterwards. Leave the token blank during normal use.
+
+### v1.0.28 special override isolation
+
+Special override sections are isolated by detected device type. Pet Feeder options only apply to devices that look like pet feeders or expose pet-feeder DPs such as `quick_feed`, `manual_feed`, `slow_feed`, or `feed_state`. Blind/window-covering options only apply to blinds, curtains, or shades. AC temperature options only apply to AC-looking devices. Switch channel names only apply to switch/outlet devices with Tuya switch DPs. This prevents old or accidental settings from making blinds appear as pet feeders, pet feeders appear as blinds, or unrelated devices appear in the wrong override table.

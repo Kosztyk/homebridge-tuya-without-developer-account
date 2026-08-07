@@ -68,7 +68,7 @@
                 "category": {
                   "type": "string",
                   "title": "Custom Type / Category Override",
-                  "description": "Optional. Force a device to use a specific Tuya category handler. Use Pet Feeder / cwwsq when Tuya reports a pet feeder with an unsupported or incorrect category.",
+                  "description": "Optional. Force a device to use a specific Tuya category handler. Special category overrides are isolated by detected device type so Pet Feeder, Blind/Window Covering, AC, and channel-name settings cannot bleed into unrelated devices.",
                   "oneOf": [
                     {
                       "title": "No override",
@@ -204,7 +204,7 @@
                 "petFeeder": {
                   "type": "object",
                   "title": "Smart Pet Feeder Options",
-                  "description": "Optional settings for Tuya pet feeders. The plugin exposes a refined HomeKit Valve-style Feed Now control, Quick Feed switch, optional Slow Feed switch, feeding-state sensor, and battery when supported.",
+                  "description": "Optional settings for detected Tuya pet feeders only. The plugin exposes a refined HomeKit Valve-style Feed Now control, Quick Feed switch, optional Slow Feed switch, feeding-state sensor, and battery when supported.",
                   "properties": {
                     "manualFeedAmount": {
                       "type": "integer",

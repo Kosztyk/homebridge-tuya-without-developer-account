@@ -189,7 +189,7 @@
 <div class="tuya-nodev-card">
   <div class="tuya-nodev-title">Pet Feeder / Custom Type Overrides</div>
   <p class="tuya-nodev-small mb-3">
-    Force a detected Tuya device to use the <strong>Pet Feeder</strong> handler when Tuya reports the wrong category or the device is not auto-detected. This writes <code>category: "cwwsq"</code> and enables the Valve-style Feed Now control.
+    Configure the <strong>Pet Feeder</strong> handler only for detected pet-feeder devices. This writes <code>category: "cwwsq"</code> only when the selected device looks like a pet feeder or exposes pet-feeder DPs.
   </p>
 
   <div class="form-group">
@@ -197,7 +197,7 @@
     <select id="tuyaNodevPetDevice" class="form-control">
       <option value="">Load devices first...</option>
     </select>
-    <small class="form-text text-muted">Pet-feeder-looking devices are listed first, but any device can be selected and forced to Pet Feeder.</small>
+    <small class="form-text text-muted">Only devices that look like pet feeders or expose pet-feeder DPs are listed here. Blinds, switches, and other devices are blocked from this override.</small>
   </div>
 
   <div class="tuya-nodev-grid">
@@ -562,7 +562,9 @@
 
   function getSwitchNameOverrides() {
     const cfg = ensureConfig();
-    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id && item.switchNames && typeof item.switchNames === 'object' && !Array.isArray(item.switchNames));
+    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id
+      && item.switchNames && typeof item.switchNames === 'object' && !Array.isArray(item.switchNames)
+      && isKnownDeviceAllowed(item.id, (device) => getSwitchCodes(device).length > 0));
   }
 
 
@@ -598,7 +600,9 @@
 
   function getPetFeederOverrides() {
     const cfg = ensureConfig();
-    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id && (String(item.category || '').toLowerCase() === 'cwwsq' || (item.petFeeder && typeof item.petFeeder === 'object' && !Array.isArray(item.petFeeder))));
+    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id
+      && (String(item.category || '').toLowerCase() === 'cwwsq' || (item.petFeeder && typeof item.petFeeder === 'object' && !Array.isArray(item.petFeeder)))
+      && isKnownDeviceAllowed(item.id, isPetFeederDevice));
   }
 
   function isOnlyPetFeederOverride(item) {
@@ -610,22 +614,19 @@
     const select = $('tuyaNodevPetDevice');
     if (!select) return;
     const current = select.value;
-    if (!devices.length) {
-      select.innerHTML = '<option value="">No detected devices found</option>';
+    const candidates = devices
+      .filter(isPetFeederDevice)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    if (!candidates.length) {
+      select.innerHTML = '<option value="">No pet feeder devices found</option>';
       return;
     }
-    const sorted = [...devices].sort((a, b) => {
-      const aPet = isPetFeederDevice(a);
-      const bPet = isPetFeederDevice(b);
-      if (aPet !== bPet) return aPet ? -1 : 1;
-      return String(a.name).localeCompare(String(b.name));
-    });
-    select.innerHTML = '<option value="">Select a Tuya device...</option>' + sorted.map((device) => {
-      const tag = isPetFeederDevice(device) ? 'pet feeder candidate' : (device.category || 'device');
+    select.innerHTML = '<option value="">Select a pet feeder device...</option>' + candidates.map((device) => {
+      const tag = device.category || 'pet feeder candidate';
       const text = `${device.name} — ${tag} — ${device.id}`;
       return `<option value="${escapeHtml(device.id)}">${escapeHtml(text)}</option>`;
     }).join('');
-    if (current && sorted.some((device) => device.id === current)) {
+    if (current && candidates.some((device) => device.id === current)) {
       select.value = current;
     }
   }
@@ -681,6 +682,11 @@
         setPetFeederStatus('Select a Tuya device first.', 'warning');
         return;
       }
+      const device = detectedDevices.find((entry) => entry.id === id);
+      if (!device || !isPetFeederDevice(device)) {
+        setPetFeederStatus('This device does not look like a pet feeder and does not expose quick_feed/manual_feed/slow_feed/feed_state DPs. The override was not added.', 'danger');
+        return;
+      }
       const manualFeedAmount = Math.max(1, Math.min(12, Math.round(parseNumberInput('tuyaNodevPetManualAmount', 'Manual feed amount'))));
       const exposeSlowFeed = $('tuyaNodevPetExposeSlow')?.checked !== false;
       const override = ensureDeviceOverride(id);
@@ -730,7 +736,9 @@
 
   function getCoverOverrides() {
     const cfg = ensureConfig();
-    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id && item.windowCovering && typeof item.windowCovering === 'object' && !Array.isArray(item.windowCovering));
+    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id
+      && item.windowCovering && typeof item.windowCovering === 'object' && !Array.isArray(item.windowCovering)
+      && isKnownDeviceAllowed(item.id, isWindowCoveringDevice));
   }
 
   function isOnlyCoverOverride(item) {
@@ -819,6 +827,11 @@
     const id = $('tuyaNodevCoverDevice')?.value || '';
     if (!id) {
       setCoverStatus('Select a blind/curtain device first.', 'warning');
+      return;
+    }
+    const device = detectedDevices.find((entry) => entry.id === id);
+    if (!device || !isWindowCoveringDevice(device)) {
+      setCoverStatus('This device does not look like a blind/curtain/shade and does not expose window-covering DPs. The override was not added.', 'danger');
       return;
     }
     const invertPosition = $('tuyaNodevCoverInvert')?.checked === true;
@@ -1051,9 +1064,23 @@
     return device ? device.name : '';
   }
 
+  function getDetectedDeviceById(id) {
+    return detectedDevices.find((item) => item.id === id);
+  }
+
+  function isKnownDeviceAllowed(id, detector) {
+    const device = getDetectedDeviceById(id);
+    if (!device) {
+      return true;
+    }
+    return detector(device) === true;
+  }
+
   function getAcOverrides() {
     const cfg = ensureConfig();
-    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id && item.airConditioner && typeof item.airConditioner === 'object');
+    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id
+      && item.airConditioner && typeof item.airConditioner === 'object'
+      && isKnownDeviceAllowed(item.id, (device) => device.likelyAirConditioner === true));
   }
 
   function isOnlyAcOverride(item) {
@@ -1109,26 +1136,78 @@
   function populateDeviceSelect(devices) {
     const select = $('tuyaNodevAcDevice');
     const current = select.value;
-    if (!devices.length) {
-      select.innerHTML = '<option value="">No detected devices found</option>';
-      populateSwitchDeviceSelect(devices);
-      populatePetFeederDeviceSelect(devices);
-      populateCoverDeviceSelect(devices);
-      return;
+    const acCandidates = devices.filter((device) => device.likelyAirConditioner === true).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    if (!acCandidates.length) {
+      select.innerHTML = '<option value="">No AC devices found</option>';
+    } else {
+      select.innerHTML = '<option value="">Select an AC device...</option>' + acCandidates.map((device) => {
+        const tag = device.category || 'AC candidate';
+        const text = `${device.name} — ${tag} — ${device.id}`;
+        return `<option value="${escapeHtml(device.id)}">${escapeHtml(text)}</option>`;
+      }).join('');
+      if (current && acCandidates.some((device) => device.id === current)) {
+        select.value = current;
+      }
     }
 
-    select.innerHTML = '<option value="">Select a Tuya device...</option>' + devices.map((device) => {
-      const tag = device.likelyAirConditioner ? 'AC candidate' : (device.category || 'device');
-      const text = `${device.name} — ${tag} — ${device.id}`;
-      return `<option value="${escapeHtml(device.id)}">${escapeHtml(text)}</option>`;
-    }).join('');
-
-    if (current && devices.some((device) => device.id === current)) {
-      select.value = current;
-    }
     populateSwitchDeviceSelect(devices);
     populatePetFeederDeviceSelect(devices);
     populateCoverDeviceSelect(devices);
+  }
+
+  function cleanupMixedOverridesUsingDetectedDevices() {
+    const cfg = ensureConfig();
+    if (!Array.isArray(cfg.options.deviceOverrides) || !Array.isArray(detectedDevices) || detectedDevices.length === 0) {
+      return { changed: false, removed: 0 };
+    }
+    let changed = false;
+    let removed = 0;
+    const repaired = [];
+    for (const original of cfg.options.deviceOverrides) {
+      if (!original || !original.id) {
+        continue;
+      }
+      const item = clone(original);
+      const device = detectedDevices.find((entry) => entry.id === item.id);
+      if (!device) {
+        repaired.push(item);
+        continue;
+      }
+      if ((item.petFeeder || String(item.category || '').toLowerCase() === 'cwwsq') && !isPetFeederDevice(device)) {
+        delete item.petFeeder;
+        if (String(item.category || '').toLowerCase() === 'cwwsq') delete item.category;
+        changed = true;
+        removed++;
+      }
+      if (item.windowCovering && !isWindowCoveringDevice(device)) {
+        delete item.windowCovering;
+        if (['cl', 'clkg'].includes(String(item.category || '').toLowerCase())) delete item.category;
+        changed = true;
+        removed++;
+      }
+      if (item.airConditioner && device.likelyAirConditioner !== true) {
+        delete item.airConditioner;
+        if (['kt', 'ktkzq'].includes(String(item.category || '').toLowerCase())) delete item.category;
+        changed = true;
+        removed++;
+      }
+      if (item.switchNames && getSwitchCodes(device).length === 0) {
+        delete item.switchNames;
+        changed = true;
+        removed++;
+      }
+      const meaningfulKeys = Object.keys(item).filter((key) => key !== 'id' && item[key] !== undefined && item[key] !== null && item[key] !== '');
+      if (meaningfulKeys.length > 0) {
+        repaired.push(item);
+      } else {
+        changed = true;
+      }
+    }
+    if (changed) {
+      cfg.options.deviceOverrides = repaired;
+    }
+    return { changed, removed };
   }
 
   async function loadDetectedDevices(showToast = true) {
@@ -1136,6 +1215,7 @@
       homebridge.showSpinner();
       const res = await homebridge.request('/devices/list', {});
       detectedDevices = Array.isArray(res.devices) ? res.devices : [];
+      const repair = cleanupMixedOverridesUsingDetectedDevices();
       populateDeviceSelect(detectedDevices);
       renderAcOverrides();
       renderSwitchNameOverrides();
@@ -1144,10 +1224,17 @@
       const acCount = detectedDevices.filter((device) => device.likelyAirConditioner).length;
       const coverCount = detectedDevices.filter(isWindowCoveringDevice).length;
       const petCount = detectedDevices.filter(isPetFeederDevice).length;
-      setAcStatus(`${res.message || 'Device list loaded.'} ${acCount ? `${acCount} AC candidate(s) listed first.` : ''}`.trim(), detectedDevices.length ? 'success' : 'warning');
-      setPetFeederStatus(`${res.message || 'Device list loaded.'} ${petCount ? `${petCount} pet feeder candidate(s) found.` : 'Select any device to force it to Pet Feeder.'}`.trim(), detectedDevices.length ? 'success' : 'warning');
-      setCoverStatus(`${res.message || 'Device list loaded.'} ${coverCount ? `${coverCount} blind/curtain candidate(s) found.` : ''}`.trim(), detectedDevices.length ? 'success' : 'warning');
-      if (showToast) homebridge.toast.success(`Loaded ${detectedDevices.length} detected Tuya device(s).`, 'Tuya');
+      const repairText = repair.changed ? ` Removed ${repair.removed} misplaced special override(s) from the staged config; click Save Configuration to keep the cleanup.` : '';
+      setAcStatus(`${res.message || 'Device list loaded.'} ${acCount ? `${acCount} AC candidate(s) found.` : 'No AC candidates found.'}${repairText}`.trim(), detectedDevices.length ? (repair.changed ? 'warning' : 'success') : 'warning');
+      setPetFeederStatus(`${res.message || 'Device list loaded.'} ${petCount ? `${petCount} pet feeder candidate(s) found.` : 'No pet feeder candidates found.'}${repairText}`.trim(), detectedDevices.length ? (repair.changed ? 'warning' : 'success') : 'warning');
+      setCoverStatus(`${res.message || 'Device list loaded.'} ${coverCount ? `${coverCount} blind/curtain candidate(s) found.` : 'No blind/curtain candidates found.'}${repairText}`.trim(), detectedDevices.length ? (repair.changed ? 'warning' : 'success') : 'warning');
+      if (repair.changed) {
+        await syncConfigToUi();
+        markDirty();
+        homebridge.toast.warning('Misplaced Pet Feeder / Blind / AC override entries were cleaned from the staged config. Save Configuration to apply.', 'Tuya');
+      } else if (showToast) {
+        homebridge.toast.success(`Loaded ${detectedDevices.length} detected Tuya device(s).`, 'Tuya');
+      }
     } catch (e) {
       setAcStatus(e.message || 'Failed to load detected devices.', 'danger');
       if (showToast) homebridge.toast.error(e.message || 'Failed to load detected devices.', 'Tuya');
@@ -1181,6 +1268,11 @@
       const id = $('tuyaNodevAcDevice').value.trim();
       if (!id) {
         setAcStatus('Select a Tuya device first.', 'warning');
+        return;
+      }
+      const device = detectedDevices.find((entry) => entry.id === id);
+      if (!device || device.likelyAirConditioner !== true) {
+        setAcStatus('This device does not look like an air conditioner. The AC override was not added.', 'danger');
         return;
       }
       const minTemperature = parseNumberInput('tuyaNodevAcMin', 'Minimum temperature');
