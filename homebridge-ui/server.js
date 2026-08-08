@@ -308,6 +308,7 @@ function collectDevicesFromObject(root) {
       this.onRequest('/devices/list', this.listDevices.bind(this));
       this.onRequest('/config/platform', this.getPlatformConfigFromDisk.bind(this));
       this.onRequest('/config/platform/save', this.savePlatformConfigToDisk.bind(this));
+      this.onRequest('/config/adaptive-lighting/save', this.saveAdaptiveLightingToDisk.bind(this));
       this.onRequest('/config/switch-names/save', this.saveSwitchNamesToDisk.bind(this));
       this.onRequest('/config/switch-names/remove', this.removeSwitchNamesFromDisk.bind(this));
       this.ready();
@@ -325,8 +326,19 @@ function collectDevicesFromObject(root) {
 
     async writeHomebridgeConfigFile(config) {
       const file = this.getConfigFile();
-      await fs.promises.writeFile(file, `${JSON.stringify(config, null, 4)}\n`, { mode: 0o600 });
+      const tmp = `${file}.tmp-tuya-${process.pid}-${Date.now()}`;
+      const body = `${JSON.stringify(config, null, 4)}\n`;
+      await fs.promises.writeFile(tmp, body, { mode: 0o600 });
+      await fs.promises.rename(tmp, file);
       return file;
+    }
+
+    async backupHomebridgeConfigFile(config, suffix) {
+      const file = this.getConfigFile();
+      const stamp = Math.floor(Date.now() / 1000);
+      const backup = `${file}.${suffix}-${stamp}`;
+      await fs.promises.writeFile(backup, `${JSON.stringify(config, null, 4)}\n`, { mode: 0o600 });
+      return backup;
     }
 
     findTuyaPlatformConfig(config, create = false) {
@@ -461,15 +473,9 @@ function collectDevicesFromObject(root) {
           incomingOverrides.push(target);
           incomingById.set(id, target);
         }
-        // Disk is the source of truth for channel names once the HomeKit Names
-        // editor has written them. The Homebridge UI can later submit an older
-        // staged config that contains only switch_1, an empty object, or no
-        // switchNames at all. Always merge the disk copy last so stale UI state
-        // cannot delete switch_2/switch_3 or any other gang name.
-        const incomingNames = target.switchNames && typeof target.switchNames === 'object' && !Array.isArray(target.switchNames)
-          ? target.switchNames
-          : {};
-        target.switchNames = { ...incomingNames, ...oldNames };
+        if (!target.switchNames || typeof target.switchNames !== 'object' || Array.isArray(target.switchNames) || !Object.keys(target.switchNames).length) {
+          target.switchNames = { ...oldNames };
+        }
       }
       incomingPlatform.options.deviceOverrides = incomingOverrides;
     }
@@ -483,17 +489,52 @@ function collectDevicesFromObject(root) {
         }
         const index = config.platforms.findIndex((entry) => entry && entry.platform === PLATFORM_NAME);
         const existing = index >= 0 ? config.platforms[index] : null;
+
+        // config.json is the source of truth. Preserve channel names that were
+        // already written by the dedicated direct-to-disk path, even if a stale
+        // Homebridge UI object is later submitted.
         this.preserveDiskSwitchNames(existing, incoming);
+
+        const backup = await this.backupHomebridgeConfigFile(config, 'bak-tuya-ui');
         if (index >= 0) {
           config.platforms[index] = incoming;
         } else {
           config.platforms.push(incoming);
         }
         await this.writeHomebridgeConfigFile(config);
-        return { ok: true, platformConfig: incoming };
+
+        // Read back from disk before reporting success. This prevents the UI from
+        // claiming a save succeeded when another writer replaced config.json.
+        const verifyConfig = await this.readHomebridgeConfigFile();
+        const verified = this.findTuyaPlatformConfig(verifyConfig, false);
+        if (!verified) {
+          throw new Error('Tuya platform block was not found after writing config.json.');
+        }
+        return { ok: true, backup, platformConfig: verified };
       } catch (error) {
         if (error instanceof RequestError) throw error;
         throw new RequestError(error.message || 'Failed to save Tuya platform config.json.', { status: 500 });
+      }
+    }
+
+    async saveAdaptiveLightingToDisk(payload) {
+      try {
+        const enabled = payload?.enabled === true;
+        const config = await this.readHomebridgeConfigFile();
+        const backup = await this.backupHomebridgeConfigFile(config, 'bak-adaptive-lighting');
+        const platform = this.findTuyaPlatformConfig(config, true);
+        platform.options.enableAdaptiveLighting = enabled;
+        await this.writeHomebridgeConfigFile(config);
+
+        const verifyConfig = await this.readHomebridgeConfigFile();
+        const verified = this.findTuyaPlatformConfig(verifyConfig, false);
+        if (!verified || verified.options?.enableAdaptiveLighting !== enabled) {
+          throw new Error('Adaptive Lighting value did not survive config.json read-back verification.');
+        }
+        return { ok: true, enabled, backup, platformConfig: verified };
+      } catch (error) {
+        if (error instanceof RequestError) throw error;
+        throw new RequestError(error.message || 'Failed to save Adaptive Lighting to config.json.', { status: 500 });
       }
     }
 
@@ -506,8 +547,7 @@ function collectDevicesFromObject(root) {
         // enable Homebridge-name sync, and change the re-import token once so
         // Apple Home receives a new accessory identity with the corrected gang
         // names. Do not rely on Homebridge UI's staged plugin config here.
-        const backup = `${file}.bak-homekit-names-ui-${Date.now()}`;
-        await fs.promises.writeFile(backup, `${JSON.stringify(config, null, 4)}\n`, { mode: 0o600 });
+        const backup = await this.backupHomebridgeConfigFile(config, 'bak-homekit-names');
 
         const platform = this.findTuyaPlatformConfig(config, true);
         this.mergeDuplicateOverrides(platform);
@@ -525,18 +565,32 @@ function collectDevicesFromObject(root) {
         // Match the manual Python script exactly: every GUI channel-name write
         // creates a fresh re-import token. Reusing an old token lets Apple Home
         // keep stale names such as Bathroom 1/2/3 even though config.json is fixed.
-        const token = `names-fixed-${Date.now()}`;
+        const token = `names-fixed-${Math.floor(Date.now() / 1000)}`;
         platform.options.homeKitNameReimportToken = token;
 
         await this.writeHomebridgeConfigFile(config);
+
+        const verifyConfig = await this.readHomebridgeConfigFile();
+        const verifiedPlatform = this.findTuyaPlatformConfig(verifyConfig, false);
+        const verifiedOverride = verifiedPlatform?.options?.deviceOverrides?.find((entry) => entry && entry.id === id);
+        const verifiedNames = verifiedOverride?.switchNames;
+        const sameNames = verifiedNames && Object.keys(switchNames).length === Object.keys(verifiedNames).length
+          && Object.entries(switchNames).every(([code, name]) => verifiedNames[code] === name);
+        if (!verifiedPlatform
+            || verifiedPlatform.options?.syncHomebridgeNamesToHomeKit !== true
+            || verifiedPlatform.options?.homeKitNameReimportToken !== token
+            || !sameNames) {
+          throw new Error('Channel-name values did not survive config.json read-back verification.');
+        }
+
         return {
           ok: true,
           id,
-          switchNames: override.switchNames,
+          switchNames: verifiedNames,
           homeKitNameReimportToken: token,
           previousHomeKitNameReimportToken: previousToken || null,
           backup,
-          platformConfig: platform,
+          platformConfig: verifiedPlatform,
         };
       } catch (error) {
         if (error instanceof RequestError) throw error;

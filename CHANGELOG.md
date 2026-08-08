@@ -1,17 +1,10 @@
-# Changelog
+# 1.0.41
 
-## 1.0.40
-
-- Stopped using Homebridge UI staged config writes for the custom settings page. The custom UI now treats `/var/lib/homebridge/config.json` as the source of truth.
-- Fixed HomeKit Names GUI saving so Add / Update Channel Names writes and verifies `switchNames` directly in `config.json`, matching the manual Python repair method.
-- Fixed Save Configuration so it no longer overwrites disk-saved `switchNames` with stale UI state.
-- Fixed Adaptive Lighting persistence by loading server config without overwriting saved values from default/blank form controls.
-
-## 1.0.39
-
-- Fixed HomeKit Names GUI persistence to match the proven manual `config.json` patch path.
-- The Add / Update Channel Names button now reads the visible gang-name fields directly and writes them to disk via the backend without relying on staged Homebridge UI config.
-- Disk `switchNames` now always win over stale staged config during Save Configuration, preventing saved `switch_2`, `switch_3`, and other gang names from being dropped.
+- Made `config.json` the canonical persistence path for the custom UI instead of mixing direct writes with Homebridge UI staged `updatePluginConfig()` writes.
+- HomeKit multi-gang channel names now use the same direct read/backup/mutate/write flow as the proven Python repair script, including `bak-homekit-names-<unix-seconds>` backups and `names-fixed-<unix-seconds>` re-import tokens.
+- Added read-back verification for `switchNames`, `syncHomebridgeNamesToHomeKit`, and `homeKitNameReimportToken` before the UI reports success.
+- Adaptive Lighting is now written directly to `config.json` when toggled and read back for verification, preventing it from reverting after restart because of stale staged UI data.
+- General custom-UI saves now create a backup, write atomically via a temporary file + rename, and verify the Tuya platform block from disk before reporting success.
 
 # 1.0.38
 
