@@ -432,6 +432,42 @@ function collectDevicesFromObject(root) {
       return block;
     }
 
+    preserveDiskSwitchNames(existingPlatform, incomingPlatform) {
+      // Channel names are written directly to config.json by the HomeKit Names UI.
+      // Homebridge Config UI can later send a stale staged platform object that
+      // does not contain those switchNames. Never allow that stale save path to
+      // delete names that already exist on disk unless the dedicated remove
+      // endpoint is used.
+      const existingOverrides = Array.isArray(existingPlatform?.options?.deviceOverrides)
+        ? existingPlatform.options.deviceOverrides
+        : [];
+      const incomingOverrides = Array.isArray(incomingPlatform?.options?.deviceOverrides)
+        ? incomingPlatform.options.deviceOverrides
+        : [];
+      const incomingById = new Map();
+      for (const item of incomingOverrides) {
+        const id = firstString(item?.id);
+        if (id) incomingById.set(id, item);
+      }
+      for (const oldItem of existingOverrides) {
+        const id = firstString(oldItem?.id);
+        const oldNames = oldItem?.switchNames;
+        if (!id || !oldNames || typeof oldNames !== 'object' || Array.isArray(oldNames) || !Object.keys(oldNames).length) {
+          continue;
+        }
+        let target = incomingById.get(id);
+        if (!target) {
+          target = { id };
+          incomingOverrides.push(target);
+          incomingById.set(id, target);
+        }
+        if (!target.switchNames || typeof target.switchNames !== 'object' || Array.isArray(target.switchNames) || !Object.keys(target.switchNames).length) {
+          target.switchNames = { ...oldNames };
+        }
+      }
+      incomingPlatform.options.deviceOverrides = incomingOverrides;
+    }
+
     async savePlatformConfigToDisk(payload) {
       try {
         const incoming = this.normalisePlatformPayload(payload?.platformConfig || payload);
@@ -440,6 +476,8 @@ function collectDevicesFromObject(root) {
           config.platforms = [];
         }
         const index = config.platforms.findIndex((entry) => entry && entry.platform === PLATFORM_NAME);
+        const existing = index >= 0 ? config.platforms[index] : null;
+        this.preserveDiskSwitchNames(existing, incoming);
         if (index >= 0) {
           config.platforms[index] = incoming;
         } else {
@@ -478,8 +516,10 @@ function collectDevicesFromObject(root) {
         override.switchNames = { ...switchNames };
 
         const previousToken = firstString(platform.options.homeKitNameReimportToken);
-        const requestedToken = firstString(payload?.homeKitNameReimportToken);
-        const token = requestedToken || `names-fixed-${Date.now()}`;
+        // Match the manual Python script exactly: every GUI channel-name write
+        // creates a fresh re-import token. Reusing an old token lets Apple Home
+        // keep stale names such as Bathroom 1/2/3 even though config.json is fixed.
+        const token = `names-fixed-${Date.now()}`;
         platform.options.homeKitNameReimportToken = token;
 
         await this.writeHomebridgeConfigFile(config);

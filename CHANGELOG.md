@@ -1,3 +1,10 @@
+# 1.0.38
+
+- Fixed HomeKit Names GUI persistence to match the working manual config.json repair script.
+- Every Add / Update Channel Names action now writes directly to config.json and always generates a fresh HomeKit re-import token.
+- Save Configuration now preserves switchNames already stored on disk instead of overwriting them with stale staged UI config.
+- Empty HomeKit name fields no longer delete existing switchNames; only the explicit Remove button removes them.
+
 
 ## 1.0.37
 
