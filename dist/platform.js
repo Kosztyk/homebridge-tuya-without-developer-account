@@ -150,28 +150,11 @@ class TuyaPlatform {
           delete item.airConditioner;
         }
       }
-      if (item.petFeeder && typeof item.petFeeder === 'object') {
-        const normalizedPetFeeder = {};
-        const manualFeedAmount = Number(item.petFeeder.manualFeedAmount);
-        if (Number.isFinite(manualFeedAmount)) {
-          normalizedPetFeeder.manualFeedAmount = Math.max(1, Math.min(12, Math.round(manualFeedAmount)));
-        }
-        if (typeof item.petFeeder.exposeSlowFeed === 'boolean') {
-          normalizedPetFeeder.exposeSlowFeed = item.petFeeder.exposeSlowFeed;
-        }
-        if (item.petFeeder.presentation !== undefined) {
-          const presentation = String(item.petFeeder.presentation || '').trim().toLowerCase();
-          if (['switch', 'valve'].includes(presentation)) {
-            normalizedPetFeeder.presentation = presentation;
-          } else {
-            this.log.warn('[Tuya QR] Ignoring invalid petFeeder.presentation override for id "%s". Use switch or valve.', id);
-          }
-        }
-        if (Object.keys(normalizedPetFeeder).length > 0) {
-          item.petFeeder = normalizedPetFeeder;
-        } else {
-          delete item.petFeeder;
-        }
+      // The custom Pet Feeder override settings were removed. Real Tuya pet
+      // feeders are still handled automatically when Tuya reports category cwwsq,
+      // but config-level petFeeder options are ignored to avoid mixing device types.
+      if (item.petFeeder !== undefined) {
+        delete item.petFeeder;
       }
       if (item.alarm && typeof item.alarm === 'object') {
         const normalizedAlarm = {};
@@ -449,7 +432,6 @@ class TuyaPlatform {
         unbridged: deviceConfig?.unbridged ?? false,
         schemaOverrides: deviceConfig?.schema ? JSON.stringify(deviceConfig.schema) : undefined,
         airConditioner: deviceConfig?.airConditioner ? JSON.stringify(deviceConfig.airConditioner) : undefined,
-        petFeeder: deviceConfig?.petFeeder ? JSON.stringify(deviceConfig.petFeeder) : undefined,
         alarm: deviceConfig?.alarm ? JSON.stringify(deviceConfig.alarm) : undefined,
         windowCovering: deviceConfig?.windowCovering ? JSON.stringify(deviceConfig.windowCovering) : undefined,
         globalAdaptiveLighting: !!this.options.enableAdaptiveLighting,
@@ -759,8 +741,19 @@ class TuyaPlatform {
 
   getHomeKitUUID(device) {
     const token = String(this.options.homeKitNameReimportToken || '').trim();
-    const seed = token ? `${device.id}:homekit-name-reimport:${token}` : device.id;
-    return this.api.hap.uuid.generate(seed);
+    if (!token) {
+      return this.api.hap.uuid.generate(device.id);
+    }
+    // When the explicit re-import token is in use, also include the effective
+    // HomeKit naming inputs. This avoids the stale-name case where Apple Home
+    // keeps an old accessory identity even after switchNames were corrected.
+    const deviceConfig = this.getDeviceConfig(device) || {};
+    const namingSeed = JSON.stringify({
+      deviceName: device?.name || '',
+      switchNames: deviceConfig.switchNames || {},
+      category: deviceConfig.category || '',
+    });
+    return this.api.hap.uuid.generate(`${device.id}:homekit-name-reimport:${token}:${namingSeed}`);
   }
 
   getLegacyHomeKitUUID(device) {

@@ -307,6 +307,7 @@ function collectDevicesFromObject(root) {
       this.onRequest('/auth/discover', this.discoverAuth.bind(this));
       this.onRequest('/devices/list', this.listDevices.bind(this));
       this.onRequest('/config/platform', this.getPlatformConfigFromDisk.bind(this));
+      this.onRequest('/config/platform/save', this.savePlatformConfigToDisk.bind(this));
       this.onRequest('/config/switch-names/save', this.saveSwitchNamesToDisk.bind(this));
       this.onRequest('/config/switch-names/remove', this.removeSwitchNamesFromDisk.bind(this));
       this.ready();
@@ -408,6 +409,47 @@ function collectDevicesFromObject(root) {
         return { platformConfig: platformConfig || null };
       } catch (error) {
         throw new RequestError(error.message || 'Failed to read Homebridge config.json.', { status: 500 });
+      }
+    }
+
+    normalisePlatformPayload(platformConfig) {
+      if (!platformConfig || typeof platformConfig !== 'object') {
+        throw new RequestError('Invalid platform configuration payload.', { status: 400 });
+      }
+      const block = JSON.parse(JSON.stringify(platformConfig));
+      block.platform = PLATFORM_NAME;
+      block.mode = 'cloud';
+      block.options = block.options && typeof block.options === 'object' ? block.options : {};
+      block.options.projectType = '3';
+      block.options.deviceOverrides = Array.isArray(block.options.deviceOverrides) ? block.options.deviceOverrides : [];
+      this.mergeDuplicateOverrides(block);
+      // The custom Pet Feeder override UI has been removed. Keep real Tuya cwwsq devices
+      // working through automatic discovery, but do not persist custom petFeeder settings.
+      for (const override of block.options.deviceOverrides) {
+        if (!override || typeof override !== 'object') continue;
+        delete override.petFeeder;
+      }
+      return block;
+    }
+
+    async savePlatformConfigToDisk(payload) {
+      try {
+        const incoming = this.normalisePlatformPayload(payload?.platformConfig || payload);
+        const config = await this.readHomebridgeConfigFile();
+        if (!Array.isArray(config.platforms)) {
+          config.platforms = [];
+        }
+        const index = config.platforms.findIndex((entry) => entry && entry.platform === PLATFORM_NAME);
+        if (index >= 0) {
+          config.platforms[index] = incoming;
+        } else {
+          config.platforms.push(incoming);
+        }
+        await this.writeHomebridgeConfigFile(config);
+        return { ok: true, platformConfig: incoming };
+      } catch (error) {
+        if (error instanceof RequestError) throw error;
+        throw new RequestError(error.message || 'Failed to save Tuya platform config.json.', { status: 500 });
       }
     }
 

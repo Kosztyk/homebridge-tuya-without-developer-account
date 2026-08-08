@@ -621,3 +621,10 @@ Changing this token intentionally gives Tuya accessories a new HomeKit identity 
 ### v1.0.28 special override isolation
 
 Special override sections are isolated by detected device type. Pet Feeder options only apply to devices that look like pet feeders or expose pet-feeder DPs such as `quick_feed`, `manual_feed`, `slow_feed`, or `feed_state`. Blind/window-covering options only apply to blinds, curtains, or shades. AC temperature options only apply to AC-looking devices. Switch channel names only apply to switch/outlet devices with Tuya switch DPs. This prevents old or accidental settings from making blinds appear as pet feeders, pet feeders appear as blinds, or unrelated devices appear in the wrong override table.
+
+
+## v1.0.36 naming/config cleanup note
+
+The custom Pet Feeder override UI was removed because Apple Home does not provide a native Pet Feeder tile and forcing device categories from the UI could accidentally mix blinds, switches, and feeder settings. Real Tuya pet feeders still work automatically when Tuya reports category `cwwsq`.
+
+HomeKit naming is now based on the names saved in Homebridge configuration. For multi-gang switches/outlets, set `deviceOverrides[].switchNames` with every channel that should appear in Apple Home, for example `switch_1`, `switch_2`, and `switch_3`. If Apple Home has already cached stale names, set or change `options.homeKitNameReimportToken` once, save, and restart Homebridge.

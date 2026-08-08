@@ -278,3 +278,8 @@ Supported options:
 ## Override isolation note
 
 From v1.0.28, special override settings are type-scoped at runtime and in the custom UI. A Pet Feeder override will not be applied to a blind or switch, a blind/window-covering override will not be applied to a pet feeder or AC, and AC temperature overrides will not be applied to non-AC devices.
+
+
+### Pet Feeder note
+
+v1.0.36: The custom Pet Feeder override UI was removed to avoid forcing unrelated devices into the pet-feeder handler. Real Tuya pet feeders are still supported when Tuya reports category `cwwsq`.

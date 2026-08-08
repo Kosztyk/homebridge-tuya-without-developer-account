@@ -68,15 +68,11 @@
                 "category": {
                   "type": "string",
                   "title": "Custom Type / Category Override",
-                  "description": "Optional. Force a device to use a specific Tuya category handler. Special category overrides are isolated by detected device type so Pet Feeder, Blind/Window Covering, AC, and channel-name settings cannot bleed into unrelated devices.",
+                  "description": "Optional. Force a device to use a specific Tuya category handler. Use only for real device-type corrections; special options are isolated by detected device type.",
                   "oneOf": [
                     {
                       "title": "No override",
                       "const": ""
-                    },
-                    {
-                      "title": "Pet Feeder",
-                      "const": "cwwsq"
                     },
                     {
                       "title": "Switch",
@@ -198,37 +194,6 @@
                       "minimum": 0.1,
                       "maximum": 5,
                       "default": 1
-                    }
-                  }
-                },
-                "petFeeder": {
-                  "type": "object",
-                  "title": "Smart Pet Feeder Options",
-                  "description": "Optional settings for detected Tuya pet feeders only. Apple Home has no native Pet Feeder service type, so Feed Now can be shown as a Switch or a Valve-style control.",
-                  "properties": {
-                    "manualFeedAmount": {
-                      "type": "integer",
-                      "title": "Manual feed amount",
-                      "description": "Portions sent when the Feed Now control is activated.",
-                      "minimum": 1,
-                      "maximum": 12,
-                      "default": 1
-                    },
-                    "exposeSlowFeed": {
-                      "type": "boolean",
-                      "title": "Expose Slow Feed switch",
-                      "description": "Expose slow_feed as a HomeKit switch when the device supports it.",
-                      "default": true
-                    },
-                    "presentation": {
-                      "type": "string",
-                      "title": "HomeKit presentation",
-                      "description": "Apple Home has no native Pet Feeder service. Use switch for a simple Feed Now tile, or valve for the older Valve-style Feed Now control.",
-                      "enum": [
-                        "switch",
-                        "valve"
-                      ],
-                      "default": "switch"
                     }
                   }
                 },

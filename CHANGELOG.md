@@ -1,3 +1,18 @@
+## 1.0.35
+
+## 1.0.36
+
+- Reworked HomeKit name saving so the custom UI writes the full Tuya platform configuration directly to `config.json` instead of relying on Homebridge UI staged saves that could drop `switch_2` / `switch_3`.
+- HomeKit UUID re-import now also tracks effective naming inputs when `homeKitNameReimportToken` is set, so corrected multi-gang names can be imported by Apple Home as new HomeKit identities.
+- Removed the Pet Feeder custom override UI and ignored config-level `petFeeder` options. Real Tuya pet feeders with category `cwwsq` remain supported automatically.
+- Removed Pet Feeder override options from `config.schema.json`.
+
+
+- Reworked HomeKit Names UI persistence so saved `switchNames` entries are always shown, even before detected devices are loaded.
+- Saved multi-gang channel-name overrides are now included in the device selector after restart.
+- The HomeKit Names table no longer hides valid config entries just because the Tuya persist cache is stale or not loaded.
+- This release is focused only on making names stored in `config.json` visible/editable and usable again.
+
 ## 1.0.34
 
 - Fixed HomeKit Names custom UI persistence for multi-gang devices.

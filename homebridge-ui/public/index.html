@@ -186,75 +186,11 @@
   </div>
 </div>
 
-<div class="tuya-nodev-card">
-  <div class="tuya-nodev-title">Pet Feeder / Custom Type Overrides</div>
-  <p class="tuya-nodev-small mb-3">
-    Configure the <strong>Pet Feeder</strong> handler only for detected pet-feeder devices. This writes <code>category: "cwwsq"</code> only when the selected device looks like a pet feeder or exposes pet-feeder DPs.
+<div class="tuya-nodev-card" id="tuyaNodevPetFeederNotice">
+  <div class="tuya-nodev-title">Pet Feeder</div>
+  <p class="tuya-nodev-small mb-0">
+    Apple Home does not provide a native Pet Feeder tile. This plugin still supports real Tuya pet feeders when Tuya reports the correct <code>cwwsq</code> category, but the custom Pet Feeder override UI has been removed to avoid forcing blinds, switches, or other devices into the wrong handler.
   </p>
-
-  <div class="form-group">
-    <label for="tuyaNodevPetDevice">Select device</label>
-    <select id="tuyaNodevPetDevice" class="form-control">
-      <option value="">Load devices first...</option>
-    </select>
-    <small class="form-text text-muted">Only devices that look like pet feeders or expose pet-feeder DPs are listed here. Blinds, switches, and other devices are blocked from this override.</small>
-  </div>
-
-  <div class="tuya-nodev-grid">
-    <div class="form-group">
-      <label for="tuyaNodevPetManualAmount">Manual feed amount</label>
-      <input id="tuyaNodevPetManualAmount" class="form-control" type="number" min="1" max="12" step="1" value="1">
-      <small class="form-text text-muted">Portions sent when the HomeKit Feed Now / Valve control is activated.</small>
-    </div>
-    <div class="form-group">
-      <label>Custom Type</label>
-      <input class="form-control" type="text" value="Pet Feeder (cwwsq)" readonly>
-      <small class="form-text text-muted">This is saved as the Tuya category override <code>cwwsq</code>.</small>
-    </div>
-    <div class="form-group">
-      <label for="tuyaNodevPetPresentation">HomeKit presentation</label>
-      <select id="tuyaNodevPetPresentation" class="form-control">
-        <option value="switch">Feed Now switch (recommended)</option>
-        <option value="valve">Valve-style Feed Now control</option>
-      </select>
-      <small class="form-text text-muted">Apple Home has no native Pet Feeder service type. This controls how the Feed Now action is shown.</small>
-    </div>
-  </div>
-
-  <div class="form-check mb-2">
-    <input id="tuyaNodevPetExposeSlow" class="form-check-input" type="checkbox" checked>
-    <label class="form-check-label" for="tuyaNodevPetExposeSlow">Expose Slow Feed switch</label>
-    <small class="form-text text-muted">Only appears in HomeKit when the Tuya device exposes the <code>slow_feed</code> DP.</small>
-  </div>
-
-  <div class="tuya-nodev-actions">
-    <button id="tuyaNodevLoadPetDevices" class="btn btn-outline-primary" type="button">Load Detected Devices</button>
-    <button id="tuyaNodevApplyPet" class="btn btn-primary" type="button">Add / Update Pet Feeder Override</button>
-    <button id="tuyaNodevRemovePet" class="btn btn-outline-danger" type="button">Remove Selected Pet Feeder Override</button>
-  </div>
-
-  <div id="tuyaNodevPetStatus" class="tuya-nodev-ac-status alert alert-secondary">
-    Load detected devices after the plugin has authenticated and discovered your Tuya devices at least once.
-  </div>
-
-  <div class="tuya-nodev-table-wrap">
-    <table class="tuya-nodev-table">
-      <thead>
-        <tr>
-          <th>Device</th>
-          <th>Device ID</th>
-          <th>Custom Type</th>
-          <th>Manual amount</th>
-          <th>Presentation</th>
-          <th>Slow Feed</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="tuyaNodevPetOverrideRows">
-        <tr><td colspan="7" class="tuya-nodev-small">No pet-feeder custom type overrides configured.</td></tr>
-      </tbody>
-    </table>
-  </div>
 </div>
 
 <div class="tuya-nodev-card">
@@ -510,6 +446,11 @@
     if (!Array.isArray(cfg.options.deviceOverrides)) {
       cfg.options.deviceOverrides = [];
     }
+    for (const override of cfg.options.deviceOverrides) {
+      if (override && typeof override === 'object') {
+        delete override.petFeeder;
+      }
+    }
     delete cfg.options.accessId;
     delete cfg.options.accessKey;
     delete cfg.options.username;
@@ -586,9 +527,13 @@
 
   function getSwitchNameOverrides() {
     const cfg = ensureConfig();
+    // Do not hide saved channel-name overrides just because the Tuya device list
+    // has not been loaded yet, or because the device was temporarily missing from
+    // the persist cache. This table is a config editor; if switchNames exist in
+    // config.json, they must always be visible and editable.
     return (cfg.options.deviceOverrides || []).filter((item) => item && item.id
       && item.switchNames && typeof item.switchNames === 'object' && !Array.isArray(item.switchNames)
-      && isKnownDeviceAllowed(item.id, (device) => getSwitchCodes(device).length > 0));
+      && Object.keys(item.switchNames).length > 0);
   }
 
 
@@ -665,7 +610,7 @@
     }
     tbody.innerHTML = overrides.map((override) => {
       const pet = override.petFeeder || {};
-      const name = getDeviceName(override.id) || 'Unknown / not in detected cache';
+      const name = getDeviceName(override.id) || override.name || override.id || 'Unknown / not in detected cache';
       return `
         <tr>
           <td>${escapeHtml(name)}</td>
@@ -809,7 +754,7 @@
     }
     tbody.innerHTML = overrides.map((override) => {
       const cover = override.windowCovering || {};
-      const name = getDeviceName(override.id) || 'Unknown / not in detected cache';
+      const name = getDeviceName(override.id) || override.name || override.id || 'Unknown / not in detected cache';
       return `
         <tr>
           <td>${escapeHtml(name)}</td>
@@ -994,6 +939,14 @@
     return false;
   }
 
+  async function savePlatformConfigToDisk() {
+    const res = await homebridge.request('/config/platform/save', { platformConfig: currentConfig });
+    if (res?.platformConfig) {
+      applyPlatformConfigFromServer(res.platformConfig);
+    }
+    return res;
+  }
+
   async function persistSwitchNamesToDisk(id, switchNames) {
     const res = await homebridge.request('/config/switch-names/save', { id, switchNames });
     if (res?.platformConfig) {
@@ -1023,16 +976,44 @@
 
   function populateSwitchDeviceSelect(devices) {
     const select = $('tuyaNodevSwitchDevice');
+    if (!select) return;
     const current = select.value;
-    const candidates = devices
-      .map((device) => ({ ...device, switchCodes: getSwitchCodes(device) }))
-      .filter((device) => device.switchCodes.length > 0)
-      .sort((a, b) => {
-        if ((a.switchCodes.length > 1) !== (b.switchCodes.length > 1)) {
-          return a.switchCodes.length > 1 ? -1 : 1;
-        }
-        return String(a.name).localeCompare(String(b.name));
+    const byId = new Map();
+
+    for (const device of devices || []) {
+      const switchCodes = getSwitchCodes(device);
+      if (switchCodes.length > 0) {
+        byId.set(device.id, { ...device, switchCodes, fromConfigOnly: false });
+      }
+    }
+
+    // Also include devices that already have explicit switchNames in config.json,
+    // even when the detected-device cache has not been loaded yet. This prevents
+    // the UI from appearing empty after restart and prevents saved names from
+    // becoming unreachable.
+    for (const override of getSwitchNameOverrides()) {
+      const id = String(override.id || '').trim();
+      if (!id || byId.has(id)) continue;
+      const switchCodes = Object.keys(override.switchNames || {}).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      byId.set(id, {
+        id,
+        name: getDeviceName(id) || override.name || id,
+        switchCodes,
+        schemaCodes: switchCodes,
+        statusCodes: switchCodes,
+        fromConfigOnly: true,
       });
+    }
+
+    const candidates = Array.from(byId.values()).sort((a, b) => {
+      if ((a.switchCodes.length > 1) !== (b.switchCodes.length > 1)) {
+        return a.switchCodes.length > 1 ? -1 : 1;
+      }
+      if ((a.fromConfigOnly === true) !== (b.fromConfigOnly === true)) {
+        return a.fromConfigOnly === true ? 1 : -1;
+      }
+      return String(a.name).localeCompare(String(b.name));
+    });
 
     if (!candidates.length) {
       select.innerHTML = '<option value="">No switch/outlet devices found</option>';
@@ -1041,7 +1022,9 @@
     }
 
     select.innerHTML = '<option value="">Select a switch/outlet device...</option>' + candidates.map((device) => {
-      const label = `${device.name} — ${device.switchCodes.length} channel${device.switchCodes.length === 1 ? '' : 's'} — ${device.id}`;
+      const label = device.fromConfigOnly
+        ? `${device.name} — saved channel names — ${device.id}`
+        : `${device.name} — ${device.switchCodes.length} channel${device.switchCodes.length === 1 ? '' : 's'} — ${device.id}`;
       return `<option value="${escapeHtml(device.id)}">${escapeHtml(label)}</option>`;
     }).join('');
 
@@ -1062,7 +1045,8 @@
     const override = findDeviceOverride(id);
     const configured = override?.switchNames || {};
     const cachedNames = device?.homebridgeServiceNames && typeof device.homebridgeServiceNames === 'object' ? device.homebridgeServiceNames : {};
-    const codes = getSwitchCodes(device || { schemaCodes: Object.keys(configured) });
+    const savedOnlyDevice = !device ? { schemaCodes: Object.keys(configured), statusCodes: Object.keys(configured) } : device;
+    const codes = getSwitchCodes(savedOnlyDevice);
     const allCodes = Array.from(new Set([...codes, ...Object.keys(configured)])).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     if (!allCodes.length) {
       container.innerHTML = '<div class="tuya-nodev-small">No controllable switch channels were found for this device.</div>';
@@ -1088,7 +1072,7 @@
       return;
     }
     tbody.innerHTML = overrides.map((override) => {
-      const name = getDeviceName(override.id) || 'Unknown / not in detected cache';
+      const name = getDeviceName(override.id) || override.name || override.id || 'Unknown / not in detected cache';
       const names = Object.entries(override.switchNames || {})
         .map(([code, value]) => `<code>${escapeHtml(code)}</code>: ${escapeHtml(value)}`)
         .join('<br>');
@@ -1107,10 +1091,12 @@
 
   function editSwitchNameOverride(id) {
     const select = $('tuyaNodevSwitchDevice');
-    if (!detectedDevices.some((device) => device.id === id)) {
+    if (!detectedDevices.some((device) => device.id === id) && !Array.from(select.options).some((option) => option.value === id)) {
+      const override = findDeviceOverride(id);
+      const count = Object.keys(override?.switchNames || {}).length;
       const option = document.createElement('option');
       option.value = id;
-      option.textContent = `${id} — not currently in detected device cache`;
+      option.textContent = `${getDeviceName(id) || id} — saved channel names${count ? ` (${count})` : ''} — ${id}`;
       select.appendChild(option);
     }
     select.value = id;
@@ -1257,7 +1243,7 @@
 
     tbody.innerHTML = overrides.map((override) => {
       const ac = override.airConditioner || {};
-      const name = getDeviceName(override.id) || 'Unknown / not in detected cache';
+      const name = getDeviceName(override.id) || override.name || override.id || 'Unknown / not in detected cache';
       return `
         <tr>
           <td>${escapeHtml(name)}</td>
@@ -1657,43 +1643,32 @@
         'Timed out while preparing the plugin configuration for saving.'
       );
 
-      // Some Homebridge UI versions have been observed to save the config but never resolve
-      // savePluginConfig(), which leaves the custom UI spinner running forever. Timeout the
-      // UI call, then verify the saved config before showing the final result.
-      let saveTimedOut = false;
-      try {
-        await withTimeout(
-          homebridge.savePluginConfig(),
-          15000,
-          'Homebridge UI did not finish the save request in time.'
-        );
-      } catch (e) {
-        saveTimedOut = true;
-      }
+      // Save directly to Homebridge config.json through the custom UI backend. This is
+      // deliberately used instead of relying only on Homebridge UI's staged
+      // savePluginConfig(), because staged re-renders were dropping multi-gang
+      // switchNames such as switch_2/switch_3 before they reached config.json.
+      await withTimeout(
+        savePlatformConfigToDisk(),
+        8000,
+        'Timed out while writing the Tuya platform configuration to config.json.'
+      );
 
       let verified = false;
       try {
-        await delay(750);
-        verified = await verifySavedConfig(userCode);
+        await delay(500);
+        const loaded = await loadPlatformConfigFromDisk();
+        verified = loaded && currentConfig?.options?.userCode === userCode;
       } catch (e) {
         verified = false;
       }
 
-      if (saveTimedOut && !verified) {
-        throw new Error('Save did not complete. The QR auth token is saved, but the plugin configuration could not be verified. Close this window, refresh Homebridge UI, and check whether the config was saved.');
-      }
-
-      if (saveTimedOut && verified) {
-        const message = 'Configuration appears to be saved, but Homebridge UI did not return a save confirmation. Close this settings window and restart Homebridge.';
-        isDirty = false;
-        homebridge.toast.success(message, 'Tuya');
-        setStatus(message, 'success');
-        return;
+      if (!verified) {
+        throw new Error('Save did not complete. The Tuya platform configuration could not be verified in config.json. Refresh Homebridge UI and try again.');
       }
 
       isDirty = false;
-      homebridge.toast.success('Configuration saved. Restart Homebridge to load devices.', 'Tuya');
-      setStatus('Configuration saved. Restart Homebridge to load devices.', 'success');
+      homebridge.toast.success('Configuration saved to config.json. Restart Homebridge to load devices.', 'Tuya');
+      setStatus('Configuration saved to config.json. Restart Homebridge to load devices.', 'success');
     } catch (e) {
       setStatus(e.message || 'Failed to save configuration.', 'danger');
       homebridge.toast.error(e.message || 'Failed to save configuration.', 'Tuya');
@@ -1786,15 +1761,15 @@
       $('tuyaNodevRemoveAc').addEventListener('click', removeSelectedAcOverride);
       $('tuyaNodevLoadSwitchDevices').addEventListener('click', () => loadDetectedDevices(true));
       $('tuyaNodevSwitchDevice').addEventListener('change', renderSwitchChannelEditor);
-      $('tuyaNodevLoadPetDevices').addEventListener('click', () => loadDetectedDevices(true));
-      $('tuyaNodevPetDevice').addEventListener('change', () => {
+      if ($('tuyaNodevLoadPetDevices')) $('tuyaNodevLoadPetDevices').addEventListener('click', () => loadDetectedDevices(true));
+      if ($('tuyaNodevPetDevice')) $('tuyaNodevPetDevice').addEventListener('change', () => {
         const override = getPetFeederOverrides().find((item) => item.id === ($('tuyaNodevPetDevice').value || ''));
-        $('tuyaNodevPetManualAmount').value = override?.petFeeder?.manualFeedAmount ?? 1;
+        if ($('tuyaNodevPetManualAmount')) $('tuyaNodevPetManualAmount').value = override?.petFeeder?.manualFeedAmount ?? 1;
         if ($('tuyaNodevPetPresentation')) $('tuyaNodevPetPresentation').value = override?.petFeeder?.presentation || 'switch';
-        $('tuyaNodevPetExposeSlow').checked = override?.petFeeder?.exposeSlowFeed !== false;
+        if ($('tuyaNodevPetExposeSlow')) $('tuyaNodevPetExposeSlow').checked = override?.petFeeder?.exposeSlowFeed !== false;
       });
-      $('tuyaNodevApplyPet').addEventListener('click', addOrUpdatePetFeederOverride);
-      $('tuyaNodevRemovePet').addEventListener('click', removeSelectedPetFeederOverride);
+      if ($('tuyaNodevApplyPet')) $('tuyaNodevApplyPet').addEventListener('click', addOrUpdatePetFeederOverride);
+      if ($('tuyaNodevRemovePet')) $('tuyaNodevRemovePet').addEventListener('click', removeSelectedPetFeederOverride);
       $('tuyaNodevCoverDevice').addEventListener('change', () => {
         const override = findDeviceOverride($('tuyaNodevCoverDevice').value || '');
         $('tuyaNodevCoverInvert').checked = override?.windowCovering?.invertPosition === true;
