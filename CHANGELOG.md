@@ -1,3 +1,11 @@
+# 1.0.42
+
+- Fixed the custom UI persistence model to follow the official Homebridge UI contract: every canonical config change is mirrored with `updatePluginConfig()`, and explicit saves use `savePluginConfig()` after the direct `config.json` repair has been reread.
+- Fixed a load-order bug where reading `config.json` passed saved values through still-uninitialized form controls, which could turn Adaptive Lighting off in memory and blank the HomeKit name re-import token.
+- Channel-name saving still performs the proven Python-style direct `config.json` backup/mutation/write first, then synchronizes that exact reread object into Homebridge and verifies all `switchNames` survived the official save.
+- Device discovery no longer depends only on `persist/TuyaDeviceList.*.json`: it now merges the Tuya persist cache, Homebridge cached accessories, existing `switchNames` overrides, and live Tuya QR cloud discovery when Load Detected Devices is pressed.
+- Direct `config.json` writes now update the existing file in place, matching Python `Path.write_text()` behavior and preserving the existing inode ownership/mode instead of replacing it with a temporary file.
+
 # 1.0.41
 
 - Made `config.json` the canonical persistence path for the custom UI instead of mixing direct writes with Homebridge UI staged `updatePluginConfig()` writes.

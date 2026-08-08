@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const qrcode = require('qrcode');
 const { default: TuyaHACloudAPI } = require('../dist/cloud/api/TuyaHACloudAPI');
+const { default: TuyaHADeviceManager } = require('../dist/cloud/device/TuyaHADeviceManager');
 
 const PLATFORM_NAME = 'TuyaNoDeveloperAccount';
 
@@ -172,6 +173,62 @@ async function readCachedAccessoryServiceNames(homebridgeStoragePath) {
   return result;
 }
 
+
+async function readCachedAccessoryDevices(homebridgeStoragePath) {
+  const files = [
+    path.join(homebridgeStoragePath, 'accessories', 'cachedAccessories'),
+    path.join(homebridgeStoragePath, 'accessories', 'cachedAccessories.json'),
+  ];
+  let parsed;
+  for (const file of files) {
+    try {
+      parsed = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+      break;
+    } catch {
+      // Try next possible cache path.
+    }
+  }
+  const entries = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.accessories) ? parsed.accessories : [];
+  const devices = [];
+  for (const accessory of entries) {
+    if (!accessory || typeof accessory !== 'object') continue;
+    const id = firstString(accessory.context?.deviceID, accessory.context?.deviceId, accessory.context?.id);
+    if (!id) continue;
+    const name = firstString(accessory.displayName, accessory.context?.deviceName, accessory.context?.name, id);
+    const switchCodes = [];
+    const homebridgeServiceNames = {};
+    for (const service of Array.isArray(accessory.services) ? accessory.services : []) {
+      const subtype = firstString(service?.subtype);
+      if (!subtype || !/^switch(?:_\d+|_?usb_?\d+)?$/i.test(subtype)) continue;
+      switchCodes.push(subtype);
+      const candidates = [firstString(service?.displayName)];
+      for (const characteristic of Array.isArray(service?.characteristics) ? service.characteristics : []) {
+        candidates.push(characteristicStringValue(characteristic));
+      }
+      const selected = candidates
+        .map((candidate) => firstString(candidate))
+        .find((candidate) => candidate && !looksGeneratedChannelName(candidate, name, subtype));
+      if (selected) homebridgeServiceNames[subtype] = selected;
+    }
+    if (!switchCodes.length) continue;
+    devices.push({
+      id,
+      name,
+      category: firstString(accessory.context?.category) || null,
+      productName: firstString(accessory.context?.productName, accessory.context?.product_name) || null,
+      productId: firstString(accessory.context?.productId, accessory.context?.product_id) || null,
+      model: firstString(accessory.context?.model) || null,
+      online: undefined,
+      statusCodes: Array.from(new Set(switchCodes)).sort(),
+      schemaCodes: Array.from(new Set(switchCodes)).sort(),
+      homebridgeServiceNames,
+      fromCachedAccessory: true,
+      label: `${name} (${id})`,
+    });
+  }
+  return devices;
+}
+
 function collectDevicesFromObject(root) {
   const byId = new Map();
 
@@ -326,10 +383,17 @@ function collectDevicesFromObject(root) {
 
     async writeHomebridgeConfigFile(config) {
       const file = this.getConfigFile();
-      const tmp = `${file}.tmp-tuya-${process.pid}-${Date.now()}`;
       const body = `${JSON.stringify(config, null, 4)}\n`;
-      await fs.promises.writeFile(tmp, body, { mode: 0o600 });
-      await fs.promises.rename(tmp, file);
+      // Match Path.write_text() from the proven manual repair script: write the
+      // existing config.json in place. Replacing it with a temp inode can change
+      // ownership/mode and can confuse Homebridge UI file watching on some installs.
+      try {
+        await fs.promises.access(file, fs.constants.F_OK);
+        await fs.promises.writeFile(file, body, 'utf8');
+      } catch (error) {
+        if (error && error.code !== 'ENOENT') throw error;
+        await fs.promises.writeFile(file, body, { encoding: 'utf8', mode: 0o600 });
+      }
       return file;
     }
 
@@ -657,60 +721,176 @@ function collectDevicesFromObject(root) {
       return file;
     }
 
-    async listDevices() {
-      const persistDir = path.join(this.homebridgeStoragePath, 'persist');
-      let entries;
-      try {
-        entries = await fs.promises.readdir(persistDir, { withFileTypes: true });
-      } catch (err) {
-        if (err && err.code === 'ENOENT') {
-          return { devices: [], files: [], message: 'No Homebridge persist directory found yet. Authenticate and restart Homebridge once so the plugin can save a device list.' };
-        }
-        throw err;
+    async fetchLiveDevices(userCode) {
+      const code = normaliseUserCode(userCode);
+      if (!code) {
+        return { devices: [], message: 'No User Code was supplied for live Tuya discovery.' };
+      }
+      const authData = await this.readAuthFile(code);
+      if (!authData) {
+        return { devices: [], message: 'No saved QR authentication was found for live Tuya discovery.' };
       }
 
-      const candidates = [];
-      for (const entry of entries) {
-        if (!entry.isFile()) {
-          continue;
-        }
-        if (!/^TuyaDeviceList.*\.json$/i.test(entry.name)) {
-          continue;
-        }
-        const file = path.join(persistDir, entry.name);
-        const stat = await fs.promises.stat(file);
-        candidates.push({ file, mtimeMs: stat.mtimeMs });
+      const api = new TuyaHACloudAPI(
+        code,
+        authData.terminalId,
+        authData.endpoint,
+        authData.tokenInfo,
+        console,
+        false,
+        async (tokenInfo) => {
+          await this.writeAuthFile(code, {
+            ...authData,
+            endpoint: api.endpoint,
+            tokenInfo,
+            savedAt: Date.now(),
+            refreshedAt: Date.now(),
+          });
+        },
+      );
+      const manager = new TuyaHADeviceManager(api, false);
+      const homes = await manager.getHomeList();
+      if (!homes || homes.success === false) {
+        throw new Error(`Live Tuya home discovery failed: ${homes?.code || ''} ${homes?.msg || 'unknown error'}`.trim());
       }
+      const homeIDs = (homes.result || [])
+        .map((home) => firstString(home?.home_id, home?.ownerId, home?.id))
+        .filter(Boolean);
+      const liveDevices = await manager.updateDevices(homeIDs);
+      await this.writeAuthFile(code, {
+        ...authData,
+        endpoint: api.endpoint,
+        tokenInfo: api.exportTokenInfo(),
+        savedAt: Date.now(),
+      });
+      return {
+        devices: collectDevicesFromObject(liveDevices),
+        message: `Loaded ${liveDevices.length} Tuya device(s) directly from the Tuya QR cloud API.`,
+      };
+    }
 
-      candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-
+    async listDevices(payload = {}) {
       const allDevices = new Map();
       const errors = [];
+      const sources = [];
+
+      const mergeDevice = (device, source) => {
+        if (!device || !firstString(device.id)) return;
+        const id = firstString(device.id);
+        const existing = allDevices.get(id) || {};
+        const merged = {
+          ...existing,
+          ...device,
+          id,
+          name: firstString(device.name, existing.name, id),
+          category: firstString(device.category, existing.category) || null,
+          productName: firstString(device.productName, existing.productName) || null,
+          productId: firstString(device.productId, existing.productId) || null,
+          model: firstString(device.model, existing.model) || null,
+          statusCodes: Array.from(new Set([...(existing.statusCodes || []), ...(device.statusCodes || [])])).sort(),
+          schemaCodes: Array.from(new Set([...(existing.schemaCodes || []), ...(device.schemaCodes || [])])).sort(),
+          homebridgeServiceNames: {
+            ...(existing.homebridgeServiceNames || {}),
+            ...(device.homebridgeServiceNames || {}),
+          },
+        };
+        merged.likelyAirConditioner = device.likelyAirConditioner === true || existing.likelyAirConditioner === true || looksLikeAirConditioner(merged);
+        merged.likelyWindowCovering = device.likelyWindowCovering === true || existing.likelyWindowCovering === true || looksLikeWindowCovering(merged);
+        merged.likelyPetFeeder = device.likelyPetFeeder === true || existing.likelyPetFeeder === true || looksLikePetFeeder(merged);
+        merged.label = `${merged.name} (${id})`;
+        const previousSources = Array.isArray(existing.sources) ? existing.sources : [];
+        merged.sources = Array.from(new Set([...previousSources, source].filter(Boolean)));
+        allDevices.set(id, merged);
+      };
+
+      // 1) Runtime Tuya device cache written by the platform after discovery.
+      const persistDir = path.join(this.homebridgeStoragePath, 'persist');
+      const candidates = [];
+      try {
+        const entries = await fs.promises.readdir(persistDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (!entry.isFile() || !/^TuyaDeviceList.*\.json$/i.test(entry.name)) continue;
+          const file = path.join(persistDir, entry.name);
+          const stat = await fs.promises.stat(file);
+          candidates.push({ file, mtimeMs: stat.mtimeMs });
+        }
+      } catch (err) {
+        if (!err || err.code !== 'ENOENT') errors.push({ source: 'persist', message: err.message });
+      }
+      candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
       for (const candidate of candidates) {
         try {
           const data = JSON.parse(await fs.promises.readFile(candidate.file, 'utf8'));
-          for (const device of collectDevicesFromObject(data)) {
-            if (!allDevices.has(device.id)) {
-              allDevices.set(device.id, device);
-            }
-          }
+          for (const device of collectDevicesFromObject(data)) mergeDevice(device, 'persist');
         } catch (err) {
           errors.push({ file: candidate.file, message: err.message });
         }
       }
+      if (candidates.length) sources.push('persist cache');
 
-      const cachedServiceNames = await readCachedAccessoryServiceNames(this.homebridgeStoragePath);
-      for (const [id, names] of cachedServiceNames.entries()) {
-        const device = allDevices.get(id);
-        if (device) {
-          device.homebridgeServiceNames = names;
+      // 2) Homebridge cached accessories. This fallback is important for child
+      // bridges / older installs where TuyaDeviceList.* is missing but the
+      // multi-gang accessories and switch_1/switch_2/... service subtypes exist.
+      try {
+        const cachedDevices = await readCachedAccessoryDevices(this.homebridgeStoragePath);
+        for (const device of cachedDevices) mergeDevice(device, 'cachedAccessories');
+        if (cachedDevices.length) sources.push('cached accessories');
+      } catch (err) {
+        errors.push({ source: 'cachedAccessories', message: err.message });
+      }
+
+      // 3) Existing explicit switchNames in config.json must always remain
+      // selectable even if both caches are unavailable.
+      try {
+        const config = await this.readHomebridgeConfigFile();
+        const platform = this.findTuyaPlatformConfig(config, false);
+        for (const override of platform?.options?.deviceOverrides || []) {
+          const id = firstString(override?.id);
+          const switchNames = override?.switchNames;
+          if (!id || !switchNames || typeof switchNames !== 'object' || Array.isArray(switchNames)) continue;
+          const codes = Object.keys(switchNames).filter((code) => /^switch(?:_\d+|_?usb_?\d+)?$/i.test(code));
+          if (!codes.length) continue;
+          mergeDevice({
+            id,
+            name: firstString(override.name, id),
+            schemaCodes: codes,
+            statusCodes: codes,
+            homebridgeServiceNames: { ...switchNames },
+            fromConfigOnly: true,
+          }, 'config.json');
+        }
+      } catch (err) {
+        errors.push({ source: 'config.json', message: err.message });
+      }
+
+      // 4) On an explicit "Load detected devices" request, query the same Tuya
+      // QR cloud endpoints used by the runtime plugin. This removes the old hard
+      // dependency on a previously-created persist/TuyaDeviceList.* file.
+      const userCode = normaliseUserCode(payload.userCode);
+      if (payload.refresh === true && userCode) {
+        try {
+          const live = await this.fetchLiveDevices(userCode);
+          for (const device of live.devices || []) mergeDevice(device, 'live cloud');
+          if ((live.devices || []).length) sources.push('live Tuya cloud');
+        } catch (err) {
+          errors.push({ source: 'live cloud', message: err.message });
         }
       }
 
-      const devices = Array.from(allDevices.values()).sort((a, b) => {
-        if (a.likelyAirConditioner !== b.likelyAirConditioner) {
-          return a.likelyAirConditioner ? -1 : 1;
+      // Add the best cached Homebridge names to any device discovered through a
+      // different path.
+      try {
+        const cachedServiceNames = await readCachedAccessoryServiceNames(this.homebridgeStoragePath);
+        for (const [id, names] of cachedServiceNames.entries()) {
+          const device = allDevices.get(id);
+          if (device) device.homebridgeServiceNames = { ...(device.homebridgeServiceNames || {}), ...names };
         }
+      } catch (err) {
+        errors.push({ source: 'cached service names', message: err.message });
+      }
+
+      const devices = Array.from(allDevices.values()).sort((a, b) => {
+        if (a.likelyAirConditioner !== b.likelyAirConditioner) return a.likelyAirConditioner ? -1 : 1;
         return String(a.name).localeCompare(String(b.name));
       });
 
@@ -718,10 +898,12 @@ function collectDevicesFromObject(root) {
         devices,
         files: candidates.map((item) => item.file),
         errors,
-        message: devices.length ? `Loaded ${devices.length} Tuya device(s) from Homebridge persist cache.` : 'No devices found in TuyaDeviceList cache yet. Authenticate and restart Homebridge once, then reopen this settings page.',
+        sources,
+        message: devices.length
+          ? `Loaded ${devices.length} Tuya device(s) from ${sources.length ? sources.join(', ') : 'available Homebridge data'}.`
+          : 'No Tuya devices could be discovered from live cloud, Homebridge cached accessories, config.json overrides, or TuyaDeviceList cache.',
       };
     }
-
 
 
     async discoverAuth() {

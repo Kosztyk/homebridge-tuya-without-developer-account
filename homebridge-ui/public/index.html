@@ -468,21 +468,45 @@
   }
 
   async function pushCurrentConfigToHomebridge() {
-    // Intentionally do not call homebridge.updatePluginConfig() here. This custom
-    // UI writes config.json through its backend and then reads it back. Keeping a
-    // second staged Homebridge UI copy was the race that could restore stale
-    // switchNames / Adaptive Lighting values after they had already been saved.
+    // Homebridge custom UI requires updatePluginConfig() whenever the config
+    // changes. Keep the staged UI copy synchronized with our current object so
+    // closing/re-rendering the settings page cannot restore an older copy.
     ensureConfig();
     mergeDuplicateDeviceOverridesInUi();
-    return { ok: true };
+    isUpdatingPluginConfig = true;
+    try {
+      await homebridge.updatePluginConfig([clone(currentConfig)]);
+    } finally {
+      setTimeout(() => { isUpdatingPluginConfig = false; }, 0);
+    }
+  }
+
+  async function syncCanonicalConfigToHomebridge(saveToDisk = false) {
+    // Direct backend writes are intentionally retained because they reproduce the
+    // proven Python repair. Immediately reread that exact disk state and mirror it
+    // into Homebridge's official plugin config buffer. When requested, save the
+    // same canonical object through Homebridge too, preventing a stale UI buffer
+    // from overwriting the direct write later.
+    const loaded = await loadPlatformConfigFromDisk();
+    if (!loaded) throw new Error('Could not reread the Tuya platform from config.json.');
+    isUpdatingPluginConfig = true;
+    try {
+      await homebridge.updatePluginConfig([clone(currentConfig)]);
+      if (saveToDisk && homebridge.savePluginConfig) {
+        await homebridge.savePluginConfig();
+      }
+    } finally {
+      setTimeout(() => { isUpdatingPluginConfig = false; }, 0);
+    }
+    if (saveToDisk) {
+      await loadPlatformConfigFromDisk();
+    }
+    return currentConfig;
   }
 
   async function syncConfigToUi() {
-    // Keep edits in the local canonical object only. Disk is updated explicitly
-    // through /config/platform/save or a dedicated direct-save endpoint.
     collectVisibleSwitchNames();
-    ensureConfig();
-    mergeDuplicateDeviceOverridesInUi();
+    await pushCurrentConfigToHomebridge();
     renderAcOverrides();
     renderSwitchNameOverrides();
     renderPetFeederOverrides();
@@ -917,8 +941,17 @@
     if (!platformConfig || typeof platformConfig !== 'object') {
       return;
     }
+    // Never normalise a server/disk config through form controls while loading.
+    // During init those controls still contain defaults (unchecked Adaptive
+    // Lighting, blank re-import token), which previously erased valid disk values
+    // in memory before the UI had even rendered them.
     const existingUserCode = getUserCode();
-    currentConfig = normaliseConfig(platformConfig);
+    currentConfig = clone(platformConfig);
+    currentConfig.platform = PLATFORM;
+    currentConfig.mode = 'cloud';
+    currentConfig.options = currentConfig.options && typeof currentConfig.options === 'object' ? currentConfig.options : {};
+    currentConfig.options.projectType = '3';
+    currentConfig.options.deviceOverrides = Array.isArray(currentConfig.options.deviceOverrides) ? currentConfig.options.deviceOverrides : [];
     if (existingUserCode && !currentConfig.options.userCode) {
       currentConfig.options.userCode = existingUserCode;
     }
@@ -1185,12 +1218,17 @@
         // buffer. This avoids Homebridge UI re-render/native-save races that were
         // dropping switch_2/switch_3 and making the table empty after restart.
         const persisted = await persistSwitchNamesToDisk(result.id, switchNames);
-        // Do not call updatePluginConfig() here. The backend already wrote the
-        // same structure directly into /var/lib/homebridge/config.json and
-        // returned the canonical platform config. Calling the staged Homebridge UI
-        // save path immediately afterwards was the source of dropped switch_2 /
-        // switch_3 values in earlier builds.
-        setSwitchStatus(`Explicit channel names saved directly to config.json for ${result.keys.length} channel(s): ${result.keys.join(', ')}. Re-import token: ${persisted?.homeKitNameReimportToken || 'unchanged'}. Restart Homebridge and reopen Apple Home.`, 'success');
+        // The direct write above is the same operation as the proven Python
+        // script. Now mirror the reread canonical disk object into Homebridge's
+        // official config buffer and save that same object, so Homebridge UI can
+        // never overwrite the repair with a stale pre-edit copy.
+        await syncCanonicalConfigToHomebridge(true);
+        const verified = findDeviceOverride(result.id)?.switchNames || {};
+        const verifiedOk = result.keys.every((key) => verified[key] === switchNames[key]);
+        if (!verifiedOk) {
+          throw new Error('Homebridge official save did not preserve every switchNames value after the direct config.json repair.');
+        }
+        setSwitchStatus(`Explicit channel names saved and verified in config.json for ${result.keys.length} channel(s): ${result.keys.join(', ')}. Re-import token: ${persisted?.homeKitNameReimportToken || 'unchanged'}. Restart Homebridge and reopen Apple Home.`, 'success');
         homebridge.toast.success('Channel names were written directly to config.json.', 'Tuya');
       } catch (e) {
         setSwitchStatus(e.message || 'Failed to save channel names to config.json.', 'danger');
@@ -1200,9 +1238,7 @@
     } else {
       setSwitchStatus('No explicit names entered. HomeKit-renamed services will still be preserved by the global option.', 'info');
     }
-    // Channel names are already written to config.json by the backend. Reload
-    // from disk so the table reflects the canonical saved config and avoid
-    // leaving a stale staged Homebridge UI config that can overwrite them.
+    // Keep the table on the canonical disk state after the verified dual save.
     await loadPlatformConfigFromDisk();
     isDirty = false;
     renderSwitchNameOverrides();
@@ -1224,6 +1260,7 @@
     }
     try {
       await removeSwitchNamesFromDisk(id);
+      await syncCanonicalConfigToHomebridge(true);
       await loadPlatformConfigFromDisk();
     } catch (e) {
       setSwitchStatus(e.message || 'Failed to remove channel names from config.json.', 'danger');
@@ -1345,7 +1382,7 @@
   async function loadDetectedDevices(showToast = true) {
     try {
       homebridge.showSpinner();
-      const res = await homebridge.request('/devices/list', {});
+      const res = await homebridge.request('/devices/list', { userCode: getUserCode(), refresh: showToast === true });
       detectedDevices = Array.isArray(res.devices) ? res.devices : [];
       const repair = cleanupMixedOverridesUsingDetectedDevices();
       populateDeviceSelect(detectedDevices);
@@ -1685,6 +1722,11 @@
         8000,
         'Timed out while writing the Tuya platform configuration to config.json.'
       );
+      await withTimeout(
+        syncCanonicalConfigToHomebridge(true),
+        8000,
+        'Timed out while synchronizing the canonical Tuya config with Homebridge UI.'
+      );
 
       let verified = false;
       try {
@@ -1780,8 +1822,12 @@
           homebridge.showSpinner();
           await syncConfigToUi();
           const saved = await persistAdaptiveLightingToDisk(enabled);
+          await syncCanonicalConfigToHomebridge(true);
+          if (currentConfig.options?.enableAdaptiveLighting !== enabled) {
+            throw new Error('Adaptive Lighting did not survive the Homebridge config save verification.');
+          }
           isDirty = false;
-          setStatus(`Adaptive Lighting ${saved?.enabled ? 'enabled' : 'disabled'} and verified directly in config.json. Restart Homebridge to apply.`, 'success');
+          setStatus(`Adaptive Lighting ${saved?.enabled ? 'enabled' : 'disabled'} and verified in config.json and Homebridge's canonical config. Restart Homebridge to apply.`, 'success');
           homebridge.toast.success('Adaptive Lighting was written directly to config.json.', 'Tuya');
         } catch (e) {
           await loadPlatformConfigFromDisk();
