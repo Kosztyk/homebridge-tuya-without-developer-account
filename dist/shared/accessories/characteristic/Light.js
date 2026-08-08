@@ -288,10 +288,14 @@ function configureAdaptiveLighting(accessory, service, brightSchema, tempSchema)
         return;
     }
     try {
-        const controller = new AdaptiveLightingController(service);
+        const { AdaptiveLightingControllerMode } = accessory.platform.api.hap;
+        const options = AdaptiveLightingControllerMode?.AUTOMATIC !== undefined
+            ? { controllerMode: AdaptiveLightingControllerMode.AUTOMATIC }
+            : undefined;
+        const controller = new AdaptiveLightingController(service, options);
         accessory.accessory.configureController(controller);
         accessory.adaptiveLightingController = controller;
-        accessory.log.info('Adaptive Lighting enabled for eligible CCT/RGBCW light.');
+        accessory.log.info('Adaptive Lighting controller configured in automatic mode for eligible CCT/RGBCW light. HomeKit can now provide and persist the transition schedule.');
     }
     catch (error) {
         accessory.log.warn(`Adaptive Lighting setup failed: ${error instanceof Error ? error.message : error}`);

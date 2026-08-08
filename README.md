@@ -455,6 +455,12 @@ HomeKit stores temperature characteristic metadata in Celsius. Do not enter Fahr
 
 ## Adaptive Lighting
 
+### v1.0.44 persistence guard
+
+Adaptive Lighting is now persisted both in `config.json` and in `tuya-adaptive-lighting.json` inside the Homebridge storage directory. The second file is a guard against a stale Homebridge settings buffer rewriting the checkbox to its default value when the modal **Save** button is pressed. On startup, the plugin uses this committed preference as the effective global Adaptive Lighting setting. Opening the settings UI also repairs `options.enableAdaptiveLighting` in `config.json` if a stale UI save changed it.
+
+The HAP-NodeJS Adaptive Lighting controller is configured in automatic mode for eligible lights. HomeKit supplies and persists the transition schedule; the controller then drives the light's ColorTemperature setter periodically while Adaptive Lighting is active.
+
 
 ### v1.0.11 User Code preservation fix
 

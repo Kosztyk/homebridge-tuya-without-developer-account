@@ -372,6 +372,9 @@
   let isDirty = false;
   let isSavingConfig = false;
   let isUpdatingPluginConfig = false;
+  let parentSaveLockDepth = 0;
+  let adaptiveLightingValue = false;
+  let adaptiveLightingValueLoaded = false;
   let detectedDevices = [];
   let discoveredUserCode = '';
 
@@ -452,6 +455,45 @@
     return value && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value;
   }
 
+  function setAdaptiveLightingValue(enabled) {
+    adaptiveLightingValue = enabled === true;
+    adaptiveLightingValueLoaded = true;
+    if ($('tuyaNodevAdaptiveLighting')) {
+      $('tuyaNodevAdaptiveLighting').checked = adaptiveLightingValue;
+    }
+    if (currentConfig && typeof currentConfig === 'object') {
+      currentConfig.options = currentConfig.options && typeof currentConfig.options === 'object' ? currentConfig.options : {};
+      currentConfig.options.enableAdaptiveLighting = adaptiveLightingValue;
+    }
+  }
+
+  function lockParentSave() {
+    parentSaveLockDepth += 1;
+    if (homebridge.disableSaveButton) homebridge.disableSaveButton();
+  }
+
+  function unlockParentSave() {
+    parentSaveLockDepth = Math.max(0, parentSaveLockDepth - 1);
+    if (parentSaveLockDepth === 0 && (isAuthenticated || isDirty) && homebridge.enableSaveButton) {
+      homebridge.enableSaveButton();
+    }
+  }
+
+  async function verifyParentAdaptiveLighting(expected) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const blocks = await homebridge.getPluginConfig();
+      const block = Array.isArray(blocks) ? blocks[0] : blocks;
+      if (block?.options?.enableAdaptiveLighting === expected) {
+        return true;
+      }
+      currentConfig.options = currentConfig.options && typeof currentConfig.options === 'object' ? currentConfig.options : {};
+      currentConfig.options.enableAdaptiveLighting = expected;
+      await homebridge.updatePluginConfig([clone(currentConfig)]);
+      await delay(75);
+    }
+    throw new Error(`Homebridge parent config did not retain Adaptive Lighting=${expected}.`);
+  }
+
   function normaliseConfig(base) {
     const cfg = base && typeof base === 'object' ? clone(base) : {};
     cfg.platform = PLATFORM;
@@ -472,7 +514,11 @@
     cfg.options.debugLevel = [];
     if ($('tuyaNodevDebugApi')?.checked === true) cfg.options.debugLevel.push('api');
     if ($('tuyaNodevDebugMqtt')?.checked === true) cfg.options.debugLevel.push('mqtt');
-    cfg.options.enableAdaptiveLighting = $('tuyaNodevAdaptiveLighting')?.checked === true;
+    if (adaptiveLightingValueLoaded) {
+      cfg.options.enableAdaptiveLighting = adaptiveLightingValue;
+    } else {
+      cfg.options.enableAdaptiveLighting = $('tuyaNodevAdaptiveLighting')?.checked === true;
+    }
     cfg.options.preserveHomeKitNames = $('tuyaNodevPreserveNames')?.checked !== false;
     cfg.options.syncHomebridgeNamesToHomeKit = $('tuyaNodevSyncHomebridgeNames')?.checked !== false;
     cfg.options.homeKitNameReimportToken = ($('tuyaNodevHomeKitNameReimportToken')?.value || '').trim();
@@ -515,7 +561,7 @@
     } finally {
       setTimeout(() => { isUpdatingPluginConfig = false; }, 0);
       // Only re-enable the parent SAVE after the canonical object is staged.
-      if ((isAuthenticated || isDirty) && homebridge.enableSaveButton) {
+      if (parentSaveLockDepth === 0 && (isAuthenticated || isDirty) && homebridge.enableSaveButton) {
         homebridge.enableSaveButton();
       }
     }
@@ -538,7 +584,7 @@
       }
     } finally {
       setTimeout(() => { isUpdatingPluginConfig = false; }, 0);
-      if ((isAuthenticated || isDirty) && homebridge.enableSaveButton) {
+      if (parentSaveLockDepth === 0 && (isAuthenticated || isDirty) && homebridge.enableSaveButton) {
         homebridge.enableSaveButton();
       }
     }
@@ -571,7 +617,7 @@
 
   function enableSaving() {
     $('tuyaNodevSave').disabled = false;
-    if (homebridge.enableSaveButton) homebridge.enableSaveButton();
+    if (parentSaveLockDepth === 0 && homebridge.enableSaveButton) homebridge.enableSaveButton();
   }
 
   function markDirty() {
@@ -999,6 +1045,7 @@
     if (existingUserCode && !currentConfig.options.userCode) {
       currentConfig.options.userCode = existingUserCode;
     }
+    setAdaptiveLightingValue(currentConfig.options.enableAdaptiveLighting === true);
     mergeDuplicateDeviceOverridesInUi();
   }
 
@@ -1031,9 +1078,7 @@
     if (res?.platformConfig) {
       applyPlatformConfigFromServer(res.platformConfig);
     }
-    if ($('tuyaNodevAdaptiveLighting')) {
-      $('tuyaNodevAdaptiveLighting').checked = res?.enabled === true;
-    }
+    setAdaptiveLightingValue(res?.enabled === true);
     return res;
   }
 
@@ -1822,7 +1867,7 @@
       $('tuyaNodevDebug').checked = currentConfig.options?.debug === true;
       $('tuyaNodevDebugApi').checked = Array.isArray(currentConfig.options?.debugLevel) && currentConfig.options.debugLevel.includes('api');
       $('tuyaNodevDebugMqtt').checked = Array.isArray(currentConfig.options?.debugLevel) && currentConfig.options.debugLevel.includes('mqtt');
-      $('tuyaNodevAdaptiveLighting').checked = currentConfig.options?.enableAdaptiveLighting === true;
+      setAdaptiveLightingValue(currentConfig.options?.enableAdaptiveLighting === true);
       $('tuyaNodevPreserveNames').checked = currentConfig.options?.preserveHomeKitNames !== false;
       $('tuyaNodevSyncHomebridgeNames').checked = currentConfig.options?.syncHomebridgeNamesToHomeKit !== false;
       if ($('tuyaNodevHomeKitNameReimportToken')) { $('tuyaNodevHomeKitNameReimportToken').value = currentConfig.options?.homeKitNameReimportToken || ''; }
@@ -1855,7 +1900,14 @@
           $('tuyaNodevDebug').checked = block.options?.debug === true;
           $('tuyaNodevDebugApi').checked = Array.isArray(block.options?.debugLevel) && block.options.debugLevel.includes('api');
           $('tuyaNodevDebugMqtt').checked = Array.isArray(block.options?.debugLevel) && block.options.debugLevel.includes('mqtt');
-          $('tuyaNodevAdaptiveLighting').checked = block.options?.enableAdaptiveLighting === true;
+          // Adaptive Lighting is committed through its dedicated direct-to-disk path.
+          // Never let a stale parent configChanged event silently replace that value.
+          if (adaptiveLightingValueLoaded) {
+            currentConfig.options.enableAdaptiveLighting = adaptiveLightingValue;
+            setAdaptiveLightingValue(adaptiveLightingValue);
+          } else {
+            setAdaptiveLightingValue(block.options?.enableAdaptiveLighting === true);
+          }
           $('tuyaNodevPreserveNames').checked = block.options?.preserveHomeKitNames !== false;
           $('tuyaNodevSyncHomebridgeNames').checked = block.options?.syncHomebridgeNamesToHomeKit !== false;
           if ($('tuyaNodevHomeKitNameReimportToken')) { $('tuyaNodevHomeKitNameReimportToken').value = block.options?.homeKitNameReimportToken || ''; }
@@ -1894,24 +1946,44 @@
       });
       $('tuyaNodevAdaptiveLighting').addEventListener('change', async () => {
         const enabled = $('tuyaNodevAdaptiveLighting').checked === true;
+        lockParentSave();
+        isDirty = true;
+        setAdaptiveLightingValue(enabled);
         try {
           homebridge.showSpinner();
+          // Keep the committed value in currentConfig first, then write it directly
+          // to config.json and the persistent Adaptive Lighting guard file.
           await syncConfigToUi();
           const saved = await persistAdaptiveLightingToDisk(enabled);
-          await syncCanonicalConfigToHomebridge(true);
-          if (currentConfig.options?.enableAdaptiveLighting !== enabled) {
-            throw new Error('Adaptive Lighting did not survive the Homebridge config save verification.');
+
+          // Mirror the exact disk-confirmed object into Homebridge's parent buffer.
+          // Do not invoke a second automatic parent save here; the direct backend
+          // write is already durable and the bottom SAVE must see the same boolean.
+          await syncCanonicalConfigToHomebridge(false);
+          setAdaptiveLightingValue(enabled);
+          currentConfig.options.enableAdaptiveLighting = enabled;
+          await homebridge.updatePluginConfig([clone(currentConfig)]);
+          await verifyParentAdaptiveLighting(enabled);
+
+          // Final direct read-back after parent staging.
+          const loaded = await loadPlatformConfigFromDisk();
+          if (!loaded || currentConfig.options?.enableAdaptiveLighting !== enabled) {
+            throw new Error('Adaptive Lighting did not survive config.json read-back verification.');
           }
-          isDirty = false;
-          setStatus(`Adaptive Lighting ${saved?.enabled ? 'enabled' : 'disabled'} and verified in config.json and Homebridge's canonical config. Restart Homebridge to apply.`, 'success');
-          homebridge.toast.success('Adaptive Lighting was written directly to config.json.', 'Tuya');
+          setAdaptiveLightingValue(enabled);
+          await homebridge.updatePluginConfig([clone(currentConfig)]);
+          await verifyParentAdaptiveLighting(enabled);
+
+          setStatus(`Adaptive Lighting ${saved?.enabled ? 'enabled' : 'disabled'} and locked into config.json, persistent state, and Homebridge's SAVE buffer. Restart Homebridge to apply.`, 'success');
+          homebridge.toast.success(`Adaptive Lighting ${saved?.enabled ? 'enabled' : 'disabled'} and verified.`, 'Tuya');
         } catch (e) {
           await loadPlatformConfigFromDisk();
-          $('tuyaNodevAdaptiveLighting').checked = currentConfig.options?.enableAdaptiveLighting === true;
-          setStatus(e.message || 'Failed to save Adaptive Lighting to config.json.', 'danger');
+          setAdaptiveLightingValue(currentConfig.options?.enableAdaptiveLighting === true);
+          setStatus(e.message || 'Failed to save Adaptive Lighting.', 'danger');
           homebridge.toast.error(e.message || 'Failed to save Adaptive Lighting.', 'Tuya');
         } finally {
           homebridge.hideSpinner();
+          unlockParentSave();
         }
       });
       $('tuyaNodevPreserveNames').addEventListener('change', async () => {

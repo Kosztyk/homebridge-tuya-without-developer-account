@@ -15,6 +15,16 @@ function safeUserCode(userCode) {
   return String(userCode || "").replace(/[^a-zA-Z0-9_.-]/g, "_");
 }
 
+function readPersistedAdaptiveLighting(storagePath) {
+  try {
+    const file = path.join(storagePath, 'tuya-adaptive-lighting.json');
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return typeof parsed?.enabled === 'boolean' ? parsed.enabled : undefined;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
 class TuyaPlatform {
   constructor(log, config, api) {
     this.log = log;
@@ -47,7 +57,16 @@ class TuyaPlatform {
     // Old Tuya IoT OpenAPI credentials, local LAN mode, username/password login, and hybrid mode are not accepted.
     this.config.mode = "cloud";
     this.options.projectType = "3";
-    this.options.enableAdaptiveLighting = this.options.enableAdaptiveLighting === true;
+    const persistedAdaptiveLighting = readPersistedAdaptiveLighting(this.api.user.storagePath());
+    if (typeof persistedAdaptiveLighting === 'boolean') {
+      if (this.options.enableAdaptiveLighting !== persistedAdaptiveLighting) {
+        this.log.warn(`[Tuya QR] Restoring Adaptive Lighting=${persistedAdaptiveLighting} from persistent UI state because config.json contained ${this.options.enableAdaptiveLighting}.`);
+      }
+      this.options.enableAdaptiveLighting = persistedAdaptiveLighting;
+      this.config.options.enableAdaptiveLighting = persistedAdaptiveLighting;
+    } else {
+      this.options.enableAdaptiveLighting = this.options.enableAdaptiveLighting === true;
+    }
     // Preserve names changed by users in Apple Home/Homebridge by default.
     // nameOverride is accepted as a compatibility alias used by some plugins.
     this.options.preserveHomeKitNames = typeof this.options.preserveHomeKitNames === 'boolean'

@@ -375,6 +375,29 @@ function collectDevicesFromObject(root) {
       return path.join(this.homebridgeStoragePath, 'config.json');
     }
 
+    getAdaptiveLightingStateFile() {
+      return path.join(this.homebridgeStoragePath, 'tuya-adaptive-lighting.json');
+    }
+
+    async readAdaptiveLightingState() {
+      try {
+        const raw = await fs.promises.readFile(this.getAdaptiveLightingStateFile(), 'utf8');
+        const parsed = JSON.parse(raw);
+        if (typeof parsed?.enabled !== 'boolean') return null;
+        return { enabled: parsed.enabled, updatedAt: firstString(parsed.updatedAt) };
+      } catch (error) {
+        if (error?.code === 'ENOENT') return null;
+        return null;
+      }
+    }
+
+    async writeAdaptiveLightingState(enabled) {
+      const file = this.getAdaptiveLightingStateFile();
+      const state = { enabled: enabled === true, updatedAt: new Date().toISOString() };
+      await fs.promises.writeFile(file, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+      return { file, ...state };
+    }
+
     async readHomebridgeConfigFile() {
       const file = this.getConfigFile();
       const raw = await fs.promises.readFile(file, 'utf8');
@@ -482,7 +505,24 @@ function collectDevicesFromObject(root) {
       try {
         const config = await this.readHomebridgeConfigFile();
         const platformConfig = this.findTuyaPlatformConfig(config, false);
-        return { platformConfig: platformConfig || null };
+        let adaptiveState = await this.readAdaptiveLightingState();
+        // Bootstrap the persistent guard from an already-saved config when upgrading
+        // from an older plugin version, before any stale UI write has a chance to win.
+        if (!adaptiveState && platformConfig && typeof platformConfig.options?.enableAdaptiveLighting === 'boolean') {
+          adaptiveState = await this.writeAdaptiveLightingState(platformConfig.options.enableAdaptiveLighting);
+        }
+        let repaired = false;
+        let backup;
+        if (platformConfig && adaptiveState && platformConfig.options?.enableAdaptiveLighting !== adaptiveState.enabled) {
+          // A stale Homebridge parent SAVE can rewrite the boolean after the custom
+          // UI already committed it. The dedicated state file is the authoritative
+          // preference for this option and lets us repair config.json on next read.
+          backup = await this.backupHomebridgeConfigFile(config, 'bak-adaptive-repair');
+          platformConfig.options.enableAdaptiveLighting = adaptiveState.enabled;
+          await this.writeHomebridgeConfigFile(config);
+          repaired = true;
+        }
+        return { platformConfig: platformConfig || null, adaptiveLightingState: adaptiveState, repaired, backup };
       } catch (error) {
         throw new RequestError(error.message || 'Failed to read Homebridge config.json.', { status: 500 });
       }
@@ -553,6 +593,10 @@ function collectDevicesFromObject(root) {
         }
         const index = config.platforms.findIndex((entry) => entry && entry.platform === PLATFORM_NAME);
         const existing = index >= 0 ? config.platforms[index] : null;
+        const adaptiveState = await this.readAdaptiveLightingState();
+        if (adaptiveState) {
+          incoming.options.enableAdaptiveLighting = adaptiveState.enabled;
+        }
 
         // config.json is the source of truth. Preserve channel names that were
         // already written by the dedicated direct-to-disk path, even if a stale
@@ -588,14 +632,23 @@ function collectDevicesFromObject(root) {
         const backup = await this.backupHomebridgeConfigFile(config, 'bak-adaptive-lighting');
         const platform = this.findTuyaPlatformConfig(config, true);
         platform.options.enableAdaptiveLighting = enabled;
+
+        // Persist the preference independently as a guard against the Homebridge
+        // parent modal later submitting a stale/default config object. Runtime also
+        // reads this state on startup, so restart cannot silently disable AL.
+        const state = await this.writeAdaptiveLightingState(enabled);
         await this.writeHomebridgeConfigFile(config);
 
         const verifyConfig = await this.readHomebridgeConfigFile();
         const verified = this.findTuyaPlatformConfig(verifyConfig, false);
+        const verifiedState = await this.readAdaptiveLightingState();
         if (!verified || verified.options?.enableAdaptiveLighting !== enabled) {
           throw new Error('Adaptive Lighting value did not survive config.json read-back verification.');
         }
-        return { ok: true, enabled, backup, platformConfig: verified };
+        if (!verifiedState || verifiedState.enabled !== enabled) {
+          throw new Error('Adaptive Lighting persistent state did not survive read-back verification.');
+        }
+        return { ok: true, enabled, backup, state, platformConfig: verified };
       } catch (error) {
         if (error instanceof RequestError) throw error;
         throw new RequestError(error.message || 'Failed to save Adaptive Lighting to config.json.', { status: 500 });

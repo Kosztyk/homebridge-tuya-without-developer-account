@@ -1,3 +1,11 @@
+## 1.0.44
+
+- Fixed Adaptive Lighting persistence when the Homebridge modal's bottom **SAVE** button is pressed immediately after toggling the option. The bottom SAVE remains locked until the direct disk write and Homebridge parent-buffer verification finish.
+- Added a persistent `tuya-adaptive-lighting.json` guard in the Homebridge storage directory. The runtime reads this preference on startup, so a stale/default Homebridge UI save cannot silently disable Adaptive Lighting after restart.
+- The settings backend repairs `options.enableAdaptiveLighting` in `config.json` from that persistent state if a stale UI write changes it.
+- Adaptive Lighting configuration no longer depends on the checkbox DOM state during unrelated config normalisation; the committed boolean is held separately and only changed by the Adaptive Lighting control.
+- Explicitly configures HAP-NodeJS `AdaptiveLightingController` in AUTOMATIC mode for eligible lights and logs successful controller setup.
+
 # 1.0.41
 
 - Made `config.json` the canonical persistence path for the custom UI instead of mixing direct writes with Homebridge UI staged `updatePluginConfig()` writes.
