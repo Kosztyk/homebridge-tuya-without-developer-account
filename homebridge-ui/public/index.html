@@ -114,6 +114,29 @@
   </div>
 </div>
 
+<div class="tuya-nodev-card">
+  <div class="tuya-nodev-title">Advanced</div>
+  <p class="tuya-nodev-small mb-3">
+    These settings replace the generated Homebridge schema form. Keeping all settings in this custom editor prevents the modal Save button from restoring schema defaults over device overrides.
+  </p>
+  <div class="form-group">
+    <label for="tuyaNodevHomeWhitelist">Home Whitelist</label>
+    <textarea id="tuyaNodevHomeWhitelist" class="form-control" rows="2" placeholder="Optional Tuya home IDs, separated by commas or new lines"></textarea>
+    <small class="form-text text-muted">Leave blank to discover devices from all homes available to the authenticated Tuya account.</small>
+  </div>
+  <div class="form-check mt-3">
+    <input id="tuyaNodevDebug" class="form-check-input" type="checkbox">
+    <label class="form-check-label" for="tuyaNodevDebug">Enable debug logging</label>
+  </div>
+  <div class="form-check mt-2">
+    <input id="tuyaNodevDebugApi" class="form-check-input" type="checkbox">
+    <label class="form-check-label" for="tuyaNodevDebugApi">API debug</label>
+  </div>
+  <div class="form-check mt-2">
+    <input id="tuyaNodevDebugMqtt" class="form-check-input" type="checkbox">
+    <label class="form-check-label" for="tuyaNodevDebugMqtt">MQTT debug</label>
+  </div>
+</div>
 
 <div class="tuya-nodev-card">
   <div class="tuya-nodev-title">Adaptive Lighting</div>
@@ -439,6 +462,16 @@
       cfg.options.userCode = effectiveUserCode;
     }
     cfg.options.projectType = '3';
+    const homeWhitelist = String($('tuyaNodevHomeWhitelist')?.value || '')
+      .split(/[,\n\r]+/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (homeWhitelist.length) cfg.options.homeWhitelist = homeWhitelist;
+    else delete cfg.options.homeWhitelist;
+    cfg.options.debug = $('tuyaNodevDebug')?.checked === true;
+    cfg.options.debugLevel = [];
+    if ($('tuyaNodevDebugApi')?.checked === true) cfg.options.debugLevel.push('api');
+    if ($('tuyaNodevDebugMqtt')?.checked === true) cfg.options.debugLevel.push('mqtt');
     cfg.options.enableAdaptiveLighting = $('tuyaNodevAdaptiveLighting')?.checked === true;
     cfg.options.preserveHomeKitNames = $('tuyaNodevPreserveNames')?.checked !== false;
     cfg.options.syncHomebridgeNamesToHomeKit = $('tuyaNodevSyncHomebridgeNames')?.checked !== false;
@@ -468,16 +501,23 @@
   }
 
   async function pushCurrentConfigToHomebridge() {
-    // Homebridge custom UI requires updatePluginConfig() whenever the config
-    // changes. Keep the staged UI copy synchronized with our current object so
-    // closing/re-rendering the settings page cannot restore an older copy.
+    // The Homebridge modal's bottom SAVE button does not call this iframe's
+    // saveConfig(). It saves the parent's pluginConfig array directly. Therefore
+    // every custom-UI edit MUST first replace the parent's options object with our
+    // complete currentConfig. With the generated schema form hidden, this becomes
+    // the single staging path and prevents defaults/stale values from winning.
     ensureConfig();
     mergeDuplicateDeviceOverridesInUi();
     isUpdatingPluginConfig = true;
+    if (homebridge.disableSaveButton) homebridge.disableSaveButton();
     try {
       await homebridge.updatePluginConfig([clone(currentConfig)]);
     } finally {
       setTimeout(() => { isUpdatingPluginConfig = false; }, 0);
+      // Only re-enable the parent SAVE after the canonical object is staged.
+      if ((isAuthenticated || isDirty) && homebridge.enableSaveButton) {
+        homebridge.enableSaveButton();
+      }
     }
   }
 
@@ -490,6 +530,7 @@
     const loaded = await loadPlatformConfigFromDisk();
     if (!loaded) throw new Error('Could not reread the Tuya platform from config.json.');
     isUpdatingPluginConfig = true;
+    if (homebridge.disableSaveButton) homebridge.disableSaveButton();
     try {
       await homebridge.updatePluginConfig([clone(currentConfig)]);
       if (saveToDisk && homebridge.savePluginConfig) {
@@ -497,6 +538,9 @@
       }
     } finally {
       setTimeout(() => { isUpdatingPluginConfig = false; }, 0);
+      if ((isAuthenticated || isDirty) && homebridge.enableSaveButton) {
+        homebridge.enableSaveButton();
+      }
     }
     if (saveToDisk) {
       await loadPlatformConfigFromDisk();
@@ -1774,13 +1818,25 @@
       // Otherwise the default unchecked checkbox can overwrite a saved true value.
       $('tuyaNodevName').value = currentConfig.name || 'Tuya without developer account';
       if (currentConfig.options?.userCode) setUserCode(currentConfig.options.userCode);
+      $('tuyaNodevHomeWhitelist').value = Array.isArray(currentConfig.options?.homeWhitelist) ? currentConfig.options.homeWhitelist.join('\n') : '';
+      $('tuyaNodevDebug').checked = currentConfig.options?.debug === true;
+      $('tuyaNodevDebugApi').checked = Array.isArray(currentConfig.options?.debugLevel) && currentConfig.options.debugLevel.includes('api');
+      $('tuyaNodevDebugMqtt').checked = Array.isArray(currentConfig.options?.debugLevel) && currentConfig.options.debugLevel.includes('mqtt');
       $('tuyaNodevAdaptiveLighting').checked = currentConfig.options?.enableAdaptiveLighting === true;
       $('tuyaNodevPreserveNames').checked = currentConfig.options?.preserveHomeKitNames !== false;
       $('tuyaNodevSyncHomebridgeNames').checked = currentConfig.options?.syncHomebridgeNamesToHomeKit !== false;
       if ($('tuyaNodevHomeKitNameReimportToken')) { $('tuyaNodevHomeKitNameReimportToken').value = currentConfig.options?.homeKitNameReimportToken || ''; }
       ensureConfig();
 
-      if (homebridge.showSchemaForm) homebridge.showSchemaForm();
+      // IMPORTANT: this plugin uses a fully custom configuration editor.
+      // Do NOT display Homebridge's generated schema form underneath it. The schema
+      // form is two-way bound directly to Homebridge UI's parent pluginConfig and
+      // may apply schema defaults / stale values. The modal's bottom SAVE button
+      // saves that parent pluginConfig directly, so showing both editors creates a
+      // second writer which can undo switchNames, Adaptive Lighting and overrides.
+      // Keep the generated form hidden and make currentConfig -> updatePluginConfig()
+      // the only staging path used by the bottom SAVE button.
+      if (homebridge.hideSchemaForm) homebridge.hideSchemaForm();
       window.homebridge.addEventListener('configChanged', (event) => {
         const data = event.data;
         const block = Array.isArray(data) ? data[0] : data;
@@ -1795,6 +1851,10 @@
           if (block.name) $('tuyaNodevName').value = block.name;
           if (block.options?.userCode) setUserCode(block.options.userCode);
           else if (getUserCode()) setUserCode(getUserCode());
+          $('tuyaNodevHomeWhitelist').value = Array.isArray(block.options?.homeWhitelist) ? block.options.homeWhitelist.join('\n') : '';
+          $('tuyaNodevDebug').checked = block.options?.debug === true;
+          $('tuyaNodevDebugApi').checked = Array.isArray(block.options?.debugLevel) && block.options.debugLevel.includes('api');
+          $('tuyaNodevDebugMqtt').checked = Array.isArray(block.options?.debugLevel) && block.options.debugLevel.includes('mqtt');
           $('tuyaNodevAdaptiveLighting').checked = block.options?.enableAdaptiveLighting === true;
           $('tuyaNodevPreserveNames').checked = block.options?.preserveHomeKitNames !== false;
           $('tuyaNodevSyncHomebridgeNames').checked = block.options?.syncHomebridgeNamesToHomeKit !== false;
@@ -1813,6 +1873,22 @@
       $('tuyaNodevClear').addEventListener('click', clearAuth);
       $('tuyaNodevSave').addEventListener('click', saveConfig);
       $('tuyaNodevName').addEventListener('input', async () => {
+        await syncConfigToUi();
+        markDirty();
+      });
+      $('tuyaNodevHomeWhitelist').addEventListener('change', async () => {
+        await syncConfigToUi();
+        markDirty();
+      });
+      $('tuyaNodevDebug').addEventListener('change', async () => {
+        await syncConfigToUi();
+        markDirty();
+      });
+      $('tuyaNodevDebugApi').addEventListener('change', async () => {
+        await syncConfigToUi();
+        markDirty();
+      });
+      $('tuyaNodevDebugMqtt').addEventListener('change', async () => {
         await syncConfigToUi();
         markDirty();
       });
