@@ -1,3 +1,11 @@
+# Changelog
+
+## 1.0.39
+
+- Fixed HomeKit Names GUI persistence to match the proven manual `config.json` patch path.
+- The Add / Update Channel Names button now reads the visible gang-name fields directly and writes them to disk via the backend without relying on staged Homebridge UI config.
+- Disk `switchNames` now always win over stale staged config during Save Configuration, preventing saved `switch_2`, `switch_3`, and other gang names from being dropped.
+
 # 1.0.38
 
 - Fixed HomeKit Names GUI persistence to match the working manual config.json repair script.

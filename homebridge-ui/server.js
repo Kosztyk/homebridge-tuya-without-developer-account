@@ -461,9 +461,15 @@ function collectDevicesFromObject(root) {
           incomingOverrides.push(target);
           incomingById.set(id, target);
         }
-        if (!target.switchNames || typeof target.switchNames !== 'object' || Array.isArray(target.switchNames) || !Object.keys(target.switchNames).length) {
-          target.switchNames = { ...oldNames };
-        }
+        // Disk is the source of truth for channel names once the HomeKit Names
+        // editor has written them. The Homebridge UI can later submit an older
+        // staged config that contains only switch_1, an empty object, or no
+        // switchNames at all. Always merge the disk copy last so stale UI state
+        // cannot delete switch_2/switch_3 or any other gang name.
+        const incomingNames = target.switchNames && typeof target.switchNames === 'object' && !Array.isArray(target.switchNames)
+          ? target.switchNames
+          : {};
+        target.switchNames = { ...incomingNames, ...oldNames };
       }
       incomingPlatform.options.deviceOverrides = incomingOverrides;
     }

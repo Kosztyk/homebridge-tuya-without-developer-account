@@ -1159,43 +1159,70 @@
   }
 
   async function addOrUpdateSwitchNames() {
-    const result = collectVisibleSwitchNames();
-    if (!result.id) {
+    const select = $('tuyaNodevSwitchDevice');
+    const id = String(select?.value || '').trim();
+    if (!id) {
       setSwitchStatus('Select a switch/outlet device first.', 'warning');
       return;
     }
-    const override = findDeviceOverride(result.id);
-    const switchNames = override?.switchNames || {};
-    if (result.keys.length > 0) {
-      try {
-        // Persist immediately to config.json as well as the Homebridge UI staging
-        // buffer. This avoids Homebridge UI re-render/native-save races that were
-        // dropping switch_2/switch_3 and making the table empty after restart.
-        const persisted = await persistSwitchNamesToDisk(result.id, switchNames);
-        // Do not call updatePluginConfig() here. The backend already wrote the
-        // same structure directly into /var/lib/homebridge/config.json and
-        // returned the canonical platform config. Calling the staged Homebridge UI
-        // save path immediately afterwards was the source of dropped switch_2 /
-        // switch_3 values in earlier builds.
-        setSwitchStatus(`Explicit channel names saved directly to config.json for ${result.keys.length} channel(s): ${result.keys.join(', ')}. Re-import token: ${persisted?.homeKitNameReimportToken || 'unchanged'}. Restart Homebridge and reopen Apple Home.`, 'success');
-        homebridge.toast.success('Channel names were written directly to config.json.', 'Tuya');
-      } catch (e) {
-        setSwitchStatus(e.message || 'Failed to save channel names to config.json.', 'danger');
-        homebridge.toast.error(e.message || 'Failed to save channel names.', 'Tuya');
-        return;
+
+    // Read the visible editor fields directly and send that exact object to the
+    // backend. Do not depend on Homebridge UI staged config here: earlier builds
+    // proved that staged config can be stale and can drop switch_2/switch_3.
+    const inputs = Array.from(document.querySelectorAll('#tuyaNodevSwitchChannels .tuya-nodev-switch-name-input'));
+    const switchNames = {};
+    for (const input of inputs) {
+      const code = String(input.getAttribute('data-code') || '').trim();
+      const value = String(input.value || '').trim();
+      if (code && value) {
+        switchNames[code] = value;
       }
-    } else {
-      setSwitchStatus('No explicit names entered. HomeKit-renamed services will still be preserved by the global option.', 'info');
     }
-    // Channel names are already written to config.json by the backend. Reload
-    // from disk so the table reflects the canonical saved config and avoid
-    // leaving a stale staged Homebridge UI config that can overwrite them.
-    await loadPlatformConfigFromDisk();
-    isDirty = false;
-    renderSwitchNameOverrides();
-    renderSwitchChannelEditor();
-    const select = $('tuyaNodevSwitchDevice');
-    if (select) select.value = result.id;
+
+    const keys = Object.keys(switchNames).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (!keys.length) {
+      setSwitchStatus('Enter at least one HomeKit name before saving channel names.', 'warning');
+      return;
+    }
+
+    try {
+      homebridge.showSpinner();
+      const persisted = await persistSwitchNamesToDisk(id, switchNames);
+
+      // Keep this browser session in sync with the canonical disk config returned
+      // by the backend, then redraw from that config. This mirrors the manual
+      // Python repair script: write config.json first, then use that as truth.
+      if (persisted?.platformConfig) {
+        applyPlatformConfigFromServer(persisted.platformConfig);
+      } else {
+        await loadPlatformConfigFromDisk();
+      }
+
+      // Ensure the edited device remains selectable even if the Tuya device cache
+      // is not loaded or is stale.
+      populateSwitchDeviceSelect(detectedDevices);
+      const refreshedSelect = $('tuyaNodevSwitchDevice');
+      if (refreshedSelect) {
+        if (!Array.from(refreshedSelect.options).some((option) => option.value === id)) {
+          const option = document.createElement('option');
+          option.value = id;
+          option.textContent = `${id} — saved channel names — ${id}`;
+          refreshedSelect.appendChild(option);
+        }
+        refreshedSelect.value = id;
+      }
+      renderSwitchNameOverrides();
+      renderSwitchChannelEditor();
+
+      isDirty = false;
+      setSwitchStatus(`Explicit channel names saved directly to config.json for ${keys.length} channel(s): ${keys.join(', ')}. Re-import token: ${persisted?.homeKitNameReimportToken || 'unchanged'}. Restart Homebridge and reopen Apple Home.`, 'success');
+      homebridge.toast.success('Channel names were written directly to config.json.', 'Tuya');
+    } catch (e) {
+      setSwitchStatus(e.message || 'Failed to save channel names to config.json.', 'danger');
+      homebridge.toast.error(e.message || 'Failed to save channel names.', 'Tuya');
+    } finally {
+      homebridge.hideSpinner();
+    }
   }
 
   async function removeSelectedSwitchNames() {
