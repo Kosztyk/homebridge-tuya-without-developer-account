@@ -948,9 +948,21 @@
   }
 
   async function persistSwitchNamesToDisk(id, switchNames) {
-    const res = await homebridge.request('/config/switch-names/save', { id, switchNames });
+    const currentToken = ($('tuyaNodevHomeKitNameReimportToken')?.value || '').trim();
+    const res = await homebridge.request('/config/switch-names/save', {
+      id,
+      switchNames,
+      // Let the backend generate a new token when the field is blank. If the user
+      // already typed a token, preserve and use that value. This mirrors the
+      // manual script that proved the Apple Home name import works.
+      homeKitNameReimportToken: currentToken || undefined,
+    });
     if (res?.platformConfig) {
       applyPlatformConfigFromServer(res.platformConfig);
+    }
+    if (res?.homeKitNameReimportToken && $('tuyaNodevHomeKitNameReimportToken')) {
+      $('tuyaNodevHomeKitNameReimportToken').value = res.homeKitNameReimportToken;
+      ensureConfig().options.homeKitNameReimportToken = res.homeKitNameReimportToken;
     }
     return res;
   }
@@ -1161,10 +1173,14 @@
         // Persist immediately to config.json as well as the Homebridge UI staging
         // buffer. This avoids Homebridge UI re-render/native-save races that were
         // dropping switch_2/switch_3 and making the table empty after restart.
-        await persistSwitchNamesToDisk(result.id, switchNames);
-        await pushCurrentConfigToHomebridge();
-        setSwitchStatus(`Explicit channel names saved for ${result.keys.length} channel(s): ${result.keys.join(', ')}. Restart Homebridge, then change the re-import token once if Apple Home still shows stale names.`, 'success');
-        homebridge.toast.success('Channel names were written to config.json.', 'Tuya');
+        const persisted = await persistSwitchNamesToDisk(result.id, switchNames);
+        // Do not call updatePluginConfig() here. The backend already wrote the
+        // same structure directly into /var/lib/homebridge/config.json and
+        // returned the canonical platform config. Calling the staged Homebridge UI
+        // save path immediately afterwards was the source of dropped switch_2 /
+        // switch_3 values in earlier builds.
+        setSwitchStatus(`Explicit channel names saved directly to config.json for ${result.keys.length} channel(s): ${result.keys.join(', ')}. Re-import token: ${persisted?.homeKitNameReimportToken || 'unchanged'}. Restart Homebridge and reopen Apple Home.`, 'success');
+        homebridge.toast.success('Channel names were written directly to config.json.', 'Tuya');
       } catch (e) {
         setSwitchStatus(e.message || 'Failed to save channel names to config.json.', 'danger');
         homebridge.toast.error(e.message || 'Failed to save channel names.', 'Tuya');

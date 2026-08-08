@@ -1,3 +1,10 @@
+
+## 1.0.37
+
+- Fixed HomeKit Names GUI save path to mirror the proven direct config.json patch.
+- ADD / UPDATE CHANNEL NAMES now writes switchNames directly to config.json, enables syncHomebridgeNamesToHomeKit, and updates the HomeKit re-import token in one backend transaction.
+- Removed the immediate staged Homebridge UI update after saving channel names, which could drop switch_2/switch_3 before restart.
+
 ## 1.0.35
 
 ## 1.0.36

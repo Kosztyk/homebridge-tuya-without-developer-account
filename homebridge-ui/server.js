@@ -456,17 +456,42 @@ function collectDevicesFromObject(root) {
     async saveSwitchNamesToDisk(payload) {
       const { id, switchNames } = this.normaliseSwitchNamesPayload(payload);
       try {
+        const file = this.getConfigFile();
         const config = await this.readHomebridgeConfigFile();
+        // Match the proven manual repair path: update config.json directly,
+        // enable Homebridge-name sync, and change the re-import token once so
+        // Apple Home receives a new accessory identity with the corrected gang
+        // names. Do not rely on Homebridge UI's staged plugin config here.
+        const backup = `${file}.bak-homekit-names-ui-${Date.now()}`;
+        await fs.promises.writeFile(backup, `${JSON.stringify(config, null, 4)}\n`, { mode: 0o600 });
+
         const platform = this.findTuyaPlatformConfig(config, true);
         this.mergeDuplicateOverrides(platform);
+        platform.options.syncHomebridgeNamesToHomeKit = true;
+
         let override = platform.options.deviceOverrides.find((entry) => entry && entry.id === id);
         if (!override) {
           override = { id };
           platform.options.deviceOverrides.push(override);
         }
+
         override.switchNames = { ...switchNames };
+
+        const previousToken = firstString(platform.options.homeKitNameReimportToken);
+        const requestedToken = firstString(payload?.homeKitNameReimportToken);
+        const token = requestedToken || `names-fixed-${Date.now()}`;
+        platform.options.homeKitNameReimportToken = token;
+
         await this.writeHomebridgeConfigFile(config);
-        return { ok: true, id, switchNames: override.switchNames, platformConfig: platform };
+        return {
+          ok: true,
+          id,
+          switchNames: override.switchNames,
+          homeKitNameReimportToken: token,
+          previousHomeKitNameReimportToken: previousToken || null,
+          backup,
+          platformConfig: platform,
+        };
       } catch (error) {
         if (error instanceof RequestError) throw error;
         throw new RequestError(error.message || 'Failed to save channel names to config.json.', { status: 500 });
