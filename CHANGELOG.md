@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.40
+
+- Stopped using Homebridge UI staged config writes for the custom settings page. The custom UI now treats `/var/lib/homebridge/config.json` as the source of truth.
+- Fixed HomeKit Names GUI saving so Add / Update Channel Names writes and verifies `switchNames` directly in `config.json`, matching the manual Python repair method.
+- Fixed Save Configuration so it no longer overwrites disk-saved `switchNames` with stale UI state.
+- Fixed Adaptive Lighting persistence by loading server config without overwriting saved values from default/blank form controls.
+
 ## 1.0.39
 
 - Fixed HomeKit Names GUI persistence to match the proven manual `config.json` patch path.

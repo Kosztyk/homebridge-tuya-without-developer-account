@@ -429,20 +429,16 @@
     return value && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value;
   }
 
-  function normaliseConfig(base) {
+  function normaliseConfigFromDisk(base) {
     const cfg = base && typeof base === 'object' ? clone(base) : {};
     cfg.platform = PLATFORM;
-    cfg.name = getPlatformName();
+    cfg.name = cfg.name || 'Tuya without developer account';
     cfg.options = cfg.options && typeof cfg.options === 'object' ? cfg.options : {};
-    const effectiveUserCode = getUserCode();
-    if (effectiveUserCode) {
-      cfg.options.userCode = effectiveUserCode;
-    }
     cfg.options.projectType = '3';
-    cfg.options.enableAdaptiveLighting = $('tuyaNodevAdaptiveLighting')?.checked === true;
-    cfg.options.preserveHomeKitNames = $('tuyaNodevPreserveNames')?.checked !== false;
-    cfg.options.syncHomebridgeNamesToHomeKit = $('tuyaNodevSyncHomebridgeNames')?.checked !== false;
-    cfg.options.homeKitNameReimportToken = ($('tuyaNodevHomeKitNameReimportToken')?.value || '').trim();
+    cfg.options.enableAdaptiveLighting = cfg.options.enableAdaptiveLighting === true;
+    cfg.options.preserveHomeKitNames = cfg.options.preserveHomeKitNames !== false;
+    cfg.options.syncHomebridgeNamesToHomeKit = cfg.options.syncHomebridgeNamesToHomeKit !== false;
+    cfg.options.homeKitNameReimportToken = String(cfg.options.homeKitNameReimportToken || '').trim();
     if (!Array.isArray(cfg.options.deviceOverrides)) {
       cfg.options.deviceOverrides = [];
     }
@@ -462,27 +458,49 @@
     return cfg;
   }
 
+  function normaliseConfig(base) {
+    const cfg = normaliseConfigFromDisk(base);
+    cfg.name = getPlatformName();
+    const effectiveUserCode = getUserCode();
+    if (effectiveUserCode) {
+      cfg.options.userCode = effectiveUserCode;
+    }
+    if ($('tuyaNodevAdaptiveLighting')) {
+      cfg.options.enableAdaptiveLighting = $('tuyaNodevAdaptiveLighting').checked === true;
+    }
+    if ($('tuyaNodevPreserveNames')) {
+      cfg.options.preserveHomeKitNames = $('tuyaNodevPreserveNames').checked !== false;
+    }
+    if ($('tuyaNodevSyncHomebridgeNames')) {
+      cfg.options.syncHomebridgeNamesToHomeKit = $('tuyaNodevSyncHomebridgeNames').checked !== false;
+    }
+    if ($('tuyaNodevHomeKitNameReimportToken')) {
+      cfg.options.homeKitNameReimportToken = ($('tuyaNodevHomeKitNameReimportToken').value || '').trim();
+    }
+    return cfg;
+  }
+
   function ensureConfig() {
     currentConfig = normaliseConfig(currentConfig);
     return currentConfig;
   }
 
   async function pushCurrentConfigToHomebridge() {
+    // v1.0.40: Do not push a staged Homebridge UI config on every field change.
+    // That staged config was the source of the lost switch_2/switch_3 names and
+    // of settings such as Adaptive Lighting being reset after refresh/restart.
+    // The custom UI now treats /var/lib/homebridge/config.json as the source of
+    // truth and writes it only through /config/platform/save or /config/switch-names/save.
     ensureConfig();
     mergeDuplicateDeviceOverridesInUi();
-    isUpdatingPluginConfig = true;
-    try {
-      await homebridge.updatePluginConfig([currentConfig]);
-    } finally {
-      setTimeout(() => { isUpdatingPluginConfig = false; }, 0);
-    }
+    return currentConfig;
   }
 
   async function syncConfigToUi() {
-    // Preserve any channel-name values currently typed in the editor before any
-    // Homebridge UI re-render/configChanged event can occur.
+    // Only update local state and redraw. Do not call homebridge.updatePluginConfig().
     collectVisibleSwitchNames();
-    await pushCurrentConfigToHomebridge();
+    ensureConfig();
+    mergeDuplicateDeviceOverridesInUi();
     renderAcOverrides();
     renderSwitchNameOverrides();
     renderPetFeederOverrides();
@@ -918,11 +936,21 @@
       return;
     }
     const existingUserCode = getUserCode();
-    currentConfig = normaliseConfig(platformConfig);
+    currentConfig = normaliseConfigFromDisk(platformConfig);
     if (existingUserCode && !currentConfig.options.userCode) {
       currentConfig.options.userCode = existingUserCode;
     }
     mergeDuplicateDeviceOverridesInUi();
+
+    // Reflect the disk config back into the visible controls without using the
+    // visible controls as input. This prevents a blank/default form field from
+    // wiping saved values returned by the backend.
+    if ($('tuyaNodevName')) $('tuyaNodevName').value = currentConfig.name || 'Tuya without developer account';
+    if (currentConfig.options?.userCode) setUserCode(currentConfig.options.userCode);
+    if ($('tuyaNodevAdaptiveLighting')) $('tuyaNodevAdaptiveLighting').checked = currentConfig.options?.enableAdaptiveLighting === true;
+    if ($('tuyaNodevPreserveNames')) $('tuyaNodevPreserveNames').checked = currentConfig.options?.preserveHomeKitNames !== false;
+    if ($('tuyaNodevSyncHomebridgeNames')) $('tuyaNodevSyncHomebridgeNames').checked = currentConfig.options?.syncHomebridgeNamesToHomeKit !== false;
+    if ($('tuyaNodevHomeKitNameReimportToken')) $('tuyaNodevHomeKitNameReimportToken').value = currentConfig.options?.homeKitNameReimportToken || '';
   }
 
   async function loadPlatformConfigFromDisk() {
@@ -1192,10 +1220,14 @@
       // Keep this browser session in sync with the canonical disk config returned
       // by the backend, then redraw from that config. This mirrors the manual
       // Python repair script: write config.json first, then use that as truth.
-      if (persisted?.platformConfig) {
-        applyPlatformConfigFromServer(persisted.platformConfig);
-      } else {
-        await loadPlatformConfigFromDisk();
+      await loadPlatformConfigFromDisk();
+      const verifiedOverride = findDeviceOverride(id);
+      const verifiedNames = verifiedOverride?.switchNames && typeof verifiedOverride.switchNames === 'object'
+        ? verifiedOverride.switchNames
+        : {};
+      const missingKeys = keys.filter((key) => verifiedNames[key] !== switchNames[key]);
+      if (missingKeys.length) {
+        throw new Error(`Channel names were not verified in config.json. Missing/not matching: ${missingKeys.join(', ')}`);
       }
 
       // Ensure the edited device remains selectable even if the Tuya device cache
@@ -1689,11 +1721,8 @@
         await persistSwitchNamesToDisk(visibleSwitchNameResult.id, override?.switchNames || {});
       }
       isSavingConfig = true;
-      await withTimeout(
-        pushCurrentConfigToHomebridge(),
-        8000,
-        'Timed out while preparing the plugin configuration for saving.'
-      );
+      ensureConfig();
+      mergeDuplicateDeviceOverridesInUi();
 
       // Save directly to Homebridge config.json through the custom UI backend. This is
       // deliberately used instead of relying only on Homebridge UI's staged
