@@ -1,3 +1,10 @@
+# 1.0.46
+
+- Fixed repeated blind tile tap-to-stop becoming unreliable after one or two stop/resume cycles. HomeKit-initiated movement state now takes precedence over stale Tuya `control=stop` values until the movement is explicitly stopped or settled.
+- Fixed bidirectional double-tap reversal. A fast second tile tap now reverses opening to closing and closing to opening both after a partial-stop resume and immediately after a tap-to-stop.
+- Ignore stale/echo `stop` control-DP updates while an internally tracked HomeKit movement is still active. Explicit HomeKit stop commands still settle immediately.
+- Applied the same state-machine fixes to both `BlindsAccessory` and `WindowCoveringAccessory`.
+
 ## 1.0.45
 
 - Reworked blind/window-covering tile behavior into a direction-aware state machine. From fully closed, tap opens; tap while opening stops; the next tap resumes opening. From fully open, the same behavior is mirrored for closing.

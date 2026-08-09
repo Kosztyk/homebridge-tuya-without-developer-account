@@ -250,7 +250,7 @@ From v1.0.15, blinds, curtains, and window coverings support `deviceOverrides[].
 
 ### v1.0.23 Blind tap-to-stop and partial-position settling
 
-Blind/window-covering accessories remove the old separate **Stop Blind** tile and use the native HomeKit blind tile for stop behavior. While the blind is opening or closing, tapping the tile sends Tuya `stop` / `STOP`, sets HomeKit `TargetPosition` to the current position, and marks `PositionState` as stopped. From v1.0.45, a later single tap resumes the same movement direction; a very quick second tap reverses it.
+Blind/window-covering accessories remove the old separate **Stop Blind** tile and use the native HomeKit blind tile for stop behavior. While the blind is opening or closing, tapping the tile sends Tuya `stop` / `STOP`, sets HomeKit `TargetPosition` to the current position, and marks `PositionState` as stopped. From v1.0.46, repeated tap-to-stop/resume cycles keep using an internal HomeKit movement state so stale Tuya `control=stop` values cannot disable later stops. A later single tap resumes the same movement direction; a very quick second tap reverses it in either direction (opening to closing or closing to opening).
 
 This fixes the case where a blind stopped at 50% stayed as `Opening...` with a spinner instead of settling at the partial position.
 

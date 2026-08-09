@@ -280,6 +280,13 @@ class BlindsAccessory extends BaseAccessory_1.default {
     clearMovementStart() {
         this.movementStart = undefined;
     }
+    getActiveHomeKitMovementDirection() {
+        if (!this.movementStart) {
+            return 0;
+        }
+        const direction = this.getDirectionBetween(this.movementStart.startPosition, this.movementStart.targetPosition);
+        return direction === 1 || direction === -1 ? direction : 0;
+    }
     getMovementDirectionBeforeStop(currentPosition) {
         if (this.movementStart) {
             const direction = this.getDirectionBetween(this.movementStart.startPosition, this.movementStart.targetPosition);
@@ -419,6 +426,12 @@ class BlindsAccessory extends BaseAccessory_1.default {
             await this.sendCommands(commands, false);
         }
         this.setLocalStoppedAtCurrentPosition(currentPosition);
+        if (reason === 'tap-to-stop' && this.getWindowCoveringOptions().doubleClickToClose !== false && (this.lastStoppedDirection === 1 || this.lastStoppedDirection === -1)) {
+            // Keep a very short reversal window after a tap-to-stop. This makes
+            // a true double tap while moving work as expected: first tap stops,
+            // second fast tap reverses the direction.
+            this.armPartialResumeTapWindow(this.lastStoppedDirection);
+        }
         await this.updateAllValues();
     }
     shouldStopOnTargetTap(targetPosition) {
@@ -428,6 +441,9 @@ class BlindsAccessory extends BaseAccessory_1.default {
         }
         if (targetPosition > 5 && targetPosition < 95) {
             return false;
+        }
+        if (this.getActiveHomeKitMovementDirection()) {
+            return true;
         }
         if (this.externalMovementTarget !== undefined) {
             return true;
@@ -473,14 +489,24 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.getSchema(...SCHEMA_CODE.POSITION);
         const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
         const { DECREASING, INCREASING, STOPPED } = this.Characteristic.PositionState;
+        if (this.isStoppedHoldActive() && this.targetPosition !== undefined) {
+            return STOPPED;
+        }
+        // A HomeKit command we are actively tracking is more authoritative than
+        // Tuya's control DP. Several motors leave control=stop while moving via
+        // percent_control, which previously made tap-to-stop fail after a cycle.
+        const activeHomeKitDirection = this.getActiveHomeKitMovementDirection();
+        if (activeHomeKitDirection > 0) {
+            return INCREASING;
+        }
+        if (activeHomeKitDirection < 0) {
+            return DECREASING;
+        }
         if (controlSchema) {
             const controlStatus = this.getStatus(controlSchema.code);
             if (this.isControlStopped(controlStatus?.value)) {
                 return STOPPED;
             }
-        }
-        if (this.isStoppedHoldActive() && this.targetPosition !== undefined) {
-            return STOPPED;
         }
         // If movement was initiated outside HomeKit from the Tuya app, or from a
         // HomeKit tap that has not settled yet, keep HomeKit direction aligned to
@@ -576,24 +602,27 @@ class BlindsAccessory extends BaseAccessory_1.default {
             const now = Date.now();
             const endpointTap = targetPos <= 5 || targetPos >= 95;
             const isPartial = this.isPartialHomeKitPosition(currentPosition);
-            const wasStopped = this.getPositionStateValue() === this.Characteristic.PositionState.STOPPED;
+            const activeHomeKitDirection = this.getActiveHomeKitMovementDirection();
+            const wasStopped = activeHomeKitDirection === 0
+                && this.externalMovementTarget === undefined
+                && this.getPositionStateValue() === this.Characteristic.PositionState.STOPPED;
             let reversedByDoubleTap = false;
-            if (this.shouldStopOnTargetTap(targetPos)) {
-                const reverseDirection = options.doubleClickToClose !== false && endpointTap
-                    ? this.getDoubleTapReverseDirection(now)
-                    : 0;
-                if (reverseDirection) {
-                    // A second fast tap after resuming from a partial stop reverses
-                    // the previous movement direction instead of stopping again.
-                    targetPos = reverseDirection > 0 ? 100 : 0;
-                    this.clearPartialResumeTapWindow();
-                    reversedByDoubleTap = true;
-                }
-                else {
-                    // Any ordinary tap while moving is a hard stop.
-                    await this.stopAtCurrentPosition(controlSchema, targetSchema, 'tap-to-stop');
-                    return;
-                }
+            // Check the reversal window BEFORE consulting reported PositionState.
+            // This is deliberately independent from Tuya control=stop because that
+            // DP is often stale while a percent-controlled motor is actually moving.
+            const reverseDirection = options.doubleClickToClose !== false && endpointTap
+                ? this.getDoubleTapReverseDirection(now)
+                : 0;
+            if (reverseDirection && (isPartial || activeHomeKitDirection !== 0)) {
+                targetPos = reverseDirection > 0 ? 100 : 0;
+                this.clearPartialResumeTapWindow();
+                reversedByDoubleTap = true;
+            }
+            else if (this.shouldStopOnTargetTap(targetPos)) {
+                // Any ordinary tap while moving is a hard stop. stopAtCurrentPosition
+                // arms a short window so an immediate second tap reverses direction.
+                await this.stopAtCurrentPosition(controlSchema, targetSchema, 'tap-to-stop');
+                return;
             }
             if (!reversedByDoubleTap && wasStopped && isPartial && endpointTap) {
                 // From a partial STOPPED position, a single tap resumes the same
@@ -614,6 +643,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.stoppedHoldUntil = 0;
             this.targetPosition = targetPos;
             this.markMovementStart(currentPosition, targetPos);
+            service.updateCharacteristic(this.Characteristic.PositionState, this.getPositionStateValue());
             this.markHomeKitCommandEchoWindow();
             this.clearExternalMovementTarget();
             this.clearExternalMovementTimer();
@@ -889,6 +919,17 @@ class BlindsAccessory extends BaseAccessory_1.default {
         const targetUpdate = targetSchema ? this.getStatusUpdate(status, targetSchema.code) : undefined;
         const controlUpdate = controlSchema ? this.getStatusUpdate(status, controlSchema.code) : undefined;
         if (controlUpdate && this.isControlStopped(controlUpdate.value)) {
+            // Ignore a stale/echo idle control DP while a HomeKit movement is still
+            // actively tracked. A real HomeKit tap-to-stop clears movementStart
+            // before sending STOP, so its acknowledgement still settles normally.
+            if (this.getActiveHomeKitMovementDirection()) {
+                const hasReliablePositionPair = !!currentSchema && !!targetSchema;
+                if (!hasReliablePositionPair || !this.isCurrentAtTarget()) {
+                    this.log.debug('Ignoring stale %s=%o while an active HomeKit blind movement is still tracked', controlSchema?.code, controlUpdate.value);
+                    await this.updateAllValues();
+                    return;
+                }
+            }
             this.clearExternalMovementTimer();
             this.clearExternalMovementTarget();
             this.setLocalStoppedAtCurrentPosition();

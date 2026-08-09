@@ -39,7 +39,7 @@ For motors that do not report live `percent_state` while moving, use `windowCove
 
 # Tuya without developer account for Homebridge
 
-Current release: **1.0.45**
+Current release: **1.0.46**
 
 
 A Homebridge platform plugin for Tuya and Smart Life devices that uses **Home Assistant-style Tuya QR Cloud Authentication**.
