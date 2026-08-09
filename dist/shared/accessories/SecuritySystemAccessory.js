@@ -37,11 +37,19 @@ class SecuritySystemAccessory extends BaseAccessory_1.default {
         };
     }
     configureServices() {
+        // SecuritySystem must remain the accessory's primary HomeKit service.
+        // Alarm panels can also expose optional Switch services (siren/mute/push),
+        // and without an explicit primary service HomeKit may present the accessory
+        // as a generic control rather than as an alarm/security system.
         const service = this.accessory.getService(this.Service.SecuritySystem)
-            || this.accessory.addService(this.Service.SecuritySystem);
+            || this.accessory.addService(this.Service.SecuritySystem, this.device.name);
+        if (typeof service.setPrimaryService === 'function') {
+            service.setPrimaryService(true);
+        }
         (0, Name_1.configureName)(this, service, this.device.name);
         this.configureCurrentState(service);
         this.configureTargetState(service);
+        this.configureAlarmType(service);
         this.configureTamper(service);
         this.configureExtraSwitches();
     }
@@ -115,6 +123,20 @@ class SecuritySystemAccessory extends BaseAccessory_1.default {
                 commands.push({ code: sosStateSchema.code, value: false });
             }
             await this.sendCommands(commands, true);
+        });
+    }
+    configureAlarmType(service) {
+        const AlarmType = this.Characteristic.SecuritySystemAlarmType;
+        if (!AlarmType) {
+            return;
+        }
+        if (!service.testCharacteristic(AlarmType)) {
+            service.addOptionalCharacteristic(AlarmType);
+        }
+        service.getCharacteristic(AlarmType)
+            .onGet(() => {
+            this.checkOnlineStatus();
+            return this.isAlarmTriggered() ? AlarmType.UNKNOWN : AlarmType.NO_ALARM;
         });
     }
     configureTamper(service) {

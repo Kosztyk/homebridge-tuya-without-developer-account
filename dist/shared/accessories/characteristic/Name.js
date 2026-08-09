@@ -43,7 +43,7 @@ function getSubtypeSuffix(subtype) {
     return match ? String(match[1]).toLowerCase() : '';
 }
 function looksLikePluginGeneratedName(candidate, generatedName, accessory, service) {
-    const safeCandidate = toSafeName(candidate, undefined);
+    const safeCandidate = toSafeName(candidate, '');
     if (!safeCandidate) {
         return true;
     }
@@ -52,8 +52,18 @@ function looksLikePluginGeneratedName(candidate, generatedName, accessory, servi
     const deviceName = normalizeNameForCompare(accessory?.device?.name || accessory?.accessory?.displayName || '');
     const subtype = normalizeNameForCompare(service?.subtype || '');
     const suffix = getSubtypeSuffix(service?.subtype);
-    const generatedWithoutDevice = deviceName && normalized === normalizeNameForCompare(String(safeCandidate).replace(new RegExp(`^${escapeRegExp(deviceName)}\\s+`, 'i'), ''));
+    const generatedWithoutDevice = deviceName
+        && generated
+        && normalized === normalizeNameForCompare(String(generatedName).replace(new RegExp(`^${escapeRegExp(deviceName)}\\s+`, 'i'), ''));
     if (!normalized) {
+        return true;
+    }
+    // Legacy/default placeholders are not real user-facing names. Older builds
+    // could accidentally persist "Tuya Service" when probing an empty cached
+    // name because toSafeName(..., undefined) activated the default parameter.
+    // Treat those placeholders as generated so the real Tuya device/service name
+    // repairs them on the next startup.
+    if (/^(tuya service|security system)$/.test(normalized)) {
         return true;
     }
     // Raw Tuya DP names and old internal service names must never be preserved as
@@ -162,7 +172,7 @@ function configureName(accessory, service, name, options = {}) {
             ? [displayName, homebridgeContextNames[subtypeKey], contextNames[subtypeKey], currentConfiguredName, currentName]
             : [contextNames[subtypeKey], currentConfiguredName, currentName, displayName];
         for (const candidate of orderedCandidates) {
-            const safe = toSafeName(candidate, undefined);
+            const safe = toSafeName(candidate, '');
             if (safe && !looksLikePluginGeneratedName(safe, generatedName, accessory, service)) {
                 targetName = safe;
                 break;
@@ -172,8 +182,10 @@ function configureName(accessory, service, name, options = {}) {
         // default, use it even when it looks like a short/simple name. This is the
         // generic multi-gang repair path for any room/device, not just Bathroom.
         if (!targetName) {
-            const safeDisplayName = toSafeName(displayName, undefined);
-            if (safeDisplayName && normalizeNameForCompare(safeDisplayName) !== normalizeNameForCompare(generatedName)) {
+            const safeDisplayName = toSafeName(displayName, '');
+            if (safeDisplayName
+                && normalizeNameForCompare(safeDisplayName) !== normalizeNameForCompare(generatedName)
+                && !looksLikePluginGeneratedName(safeDisplayName, generatedName, accessory, service)) {
                 targetName = safeDisplayName;
             }
         }

@@ -1,3 +1,10 @@
+# 1.0.47
+
+- Fixed Security System service naming. Empty cached names no longer fall through to the accidental `Tuya Service` placeholder, and existing `Tuya Service` / generic `Security System` names are repaired to the actual Tuya alarm device name on startup.
+- Marked the HomeKit `SecuritySystem` service as the accessory primary service so alarm panels remain presented as alarms even when optional siren/mute/notification switch services are exposed.
+- Added the optional HomeKit `SecuritySystemAlarmType` characteristic, reporting `NO_ALARM` normally and `UNKNOWN` while Tuya reports an alarm/SOS condition.
+- Fixed the MQTT debug selector so `MQTT debug` works independently and no longer requires `API debug` to be enabled.
+
 # 1.0.46
 
 - Fixed repeated blind tile tap-to-stop becoming unreliable after one or two stop/resume cycles. HomeKit-initiated movement state now takes precedence over stale Tuya `control=stop` values until the movement is explicitly stopped or settled.

@@ -529,7 +529,10 @@ class TuyaPlatform {
 
   async initQrCloudProject() {
     const userCode = String(this.options.userCode || "").trim();
-    const debugMode = !!(this.options.debug && ((this.options.debugLevel ?? "").length > 0 ? this.options.debugLevel?.includes("api") : true));
+    const debugLevels = Array.isArray(this.options.debugLevel) ? this.options.debugLevel : [];
+    const debugEnabled = this.options.debug === true;
+    const apiDebugMode = !!(debugEnabled && (debugLevels.length === 0 || debugLevels.includes("api")));
+    const mqttDebugMode = !!(debugEnabled && (debugLevels.length === 0 || debugLevels.includes("mqtt")));
 
     const authData = await this.readAuthData(userCode);
     if (!authData) {
@@ -539,7 +542,7 @@ class TuyaPlatform {
       return undefined;
     }
 
-    const api = new TuyaHACloudAPI(userCode, authData.terminalId, authData.endpoint, authData.tokenInfo, this.log, debugMode, async (tokenInfo) => {
+    const api = new TuyaHACloudAPI(userCode, authData.terminalId, authData.endpoint, authData.tokenInfo, this.log, apiDebugMode, async (tokenInfo) => {
       await this.writeAuthData(userCode, {
         ...authData,
         endpoint: api.endpoint,
@@ -548,7 +551,7 @@ class TuyaPlatform {
         refreshedAt: Date.now(),
       });
     });
-    const deviceManager = new TuyaHADeviceManager(api, debugMode);
+    const deviceManager = new TuyaHADeviceManager(api, mqttDebugMode);
 
     this.log.info("[Tuya QR] Fetching home list.");
     const res = await deviceManager.getHomeList();
