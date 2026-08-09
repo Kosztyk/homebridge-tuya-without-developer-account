@@ -287,3 +287,8 @@ From v1.0.28, special override settings are type-scoped at runtime and in the cu
 ### Pet Feeder note
 
 v1.0.36: The custom Pet Feeder override UI was removed to avoid forcing unrelated devices into the pet-feeder handler. Real Tuya pet feeders are still supported when Tuya reports category `cwwsq`.
+
+### Dual-light ceiling fan quirk (PID `atfenlerda169ygw`)
+
+Live Tuya Device Sharing MQTT traces confirm this fan has two physical light channels. `switch_led` controls the white lamp, `colour_data` carries RGB HSV data, and proprietary raw DP `103` reports the RGB power state (`on` / `off`). The plugin maps raw DP 103 to the writable `colour_switch` function and exposes separate White Light and RGB Light HomeKit services. RGB brightness is intentionally omitted because this firmware does not offer adjustable RGB brightness.
+

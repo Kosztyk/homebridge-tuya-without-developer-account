@@ -298,23 +298,78 @@ class TuyaHADeviceManager extends events_1.default {
             this.log.warn('Tuya HA MQTT processing error: %s', msg);
         }
     }
+    mapRawDPStatus(device, dpId, rawValue) {
+        // Some Tuya Device Sharing MQTT reports contain a proprietary DP as a
+        // numeric key only, without the usual `code` / `value` pair. The
+        // atfenlerda169ygw ceiling-fan firmware uses raw DP 103 as the power
+        // state for its separate RGB/decorative light, while the public
+        // specification exposes that writable function as `colour_switch`.
+        // Preserve this as a narrow product quirk instead of guessing what DP
+        // 103 means on unrelated Tuya products.
+        if (device?.product_id === 'atfenlerda169ygw' && String(dpId) === '103') {
+            const hasColourSwitch = Array.isArray(device.schema)
+                && device.schema.some(schema => schema?.code === 'colour_switch');
+            if (!hasColourSwitch) {
+                return undefined;
+            }
+            let value = rawValue;
+            if (typeof rawValue === 'string') {
+                const normalized = rawValue.trim().toLowerCase();
+                if (['on', 'true', '1'].includes(normalized)) {
+                    value = true;
+                }
+                else if (['off', 'false', '0'].includes(normalized)) {
+                    value = false;
+                }
+            }
+            return { code: 'colour_switch', value };
+        }
+        return undefined;
+    }
+    normalizeReportedStatus(device, status) {
+        const normalized = [];
+        for (const item of (Array.isArray(status) ? status : [])) {
+            if (!item || typeof item !== 'object') {
+                continue;
+            }
+            if (item.code !== undefined && item.value !== undefined) {
+                normalized.push({ code: item.code, value: item.value });
+                continue;
+            }
+            // Raw Device Sharing reports may look like {"103":"off"}.
+            // Do not duplicate the numeric raw representation when Tuya has
+            // already supplied a normal code/value pair in the same item.
+            for (const [key, rawValue] of Object.entries(item)) {
+                if (!/^\d+$/.test(key)) {
+                    continue;
+                }
+                const mapped = this.mapRawDPStatus(device, key, rawValue);
+                if (mapped) {
+                    this.log.debug('Mapped raw Tuya DP %s=%o to %s=%o for %s', key, rawValue, mapped.code, mapped.value, device.name || device.id);
+                    normalized.push(mapped);
+                }
+                else {
+                    this.log.debug('Ignoring unmapped raw Tuya DP %s=%o for %s', key, rawValue, device.name || device.id);
+                }
+            }
+        }
+        return normalized;
+    }
     onDeviceReport(deviceID, status) {
         const device = this.getDevice(deviceID);
         if (!device) {
             return;
         }
         const updated = [];
-        for (const item of status) {
-            if (item.code !== undefined && item.value !== undefined) {
-                const current = device.status.find(s => s.code === item.code);
-                if (current) {
-                    current.value = item.value;
-                }
-                else {
-                    device.status.push({ code: item.code, value: item.value });
-                }
-                updated.push({ code: item.code, value: item.value });
+        for (const item of this.normalizeReportedStatus(device, status)) {
+            const current = device.status.find(s => s.code === item.code);
+            if (current) {
+                current.value = item.value;
             }
+            else {
+                device.status.push({ code: item.code, value: item.value });
+            }
+            updated.push({ code: item.code, value: item.value });
         }
         if (updated.length > 0) {
             this.emit(Events.DEVICE_STATUS_UPDATE, device, updated);

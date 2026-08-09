@@ -19,6 +19,7 @@ const SCHEMA_CODE = {
     FAN_LOCK: ['child_lock'],
     FAN_SWING: ['switch_horizontal', 'switch_vertical'],
     LIGHT_ON: ['light', 'switch_led'],
+    RGB_LIGHT_ON: ['colour_switch'],
     LIGHT_MODE: ['work_mode'],
     LIGHT_BRIGHT: ['bright_value', 'bright_value_v2'],
     LIGHT_TEMP: ['temp_value', 'temp_value_v2'],
@@ -58,8 +59,15 @@ class FanAccessory extends BaseAccessory_1.default {
         this.configureRotationDirection();
         // Light
         if (this.getSchema(...SCHEMA_CODE.LIGHT_ON)) {
-            if (this.lightServiceType() === this.Service.Lightbulb) {
+            if (this.hasSeparateRgbLight()) {
+                this.configureSeparateWhiteAndRgbLights();
+            }
+            else if (this.lightServiceType() === this.Service.Lightbulb) {
                 (0, Light_1.configureLight)(this, this.lightService(), this.getSchema(...SCHEMA_CODE.LIGHT_ON), this.getSchema(...SCHEMA_CODE.LIGHT_BRIGHT), this.getSchema(...SCHEMA_CODE.LIGHT_TEMP), this.getSchema(...SCHEMA_CODE.LIGHT_COLOR), this.getSchema(...SCHEMA_CODE.LIGHT_MODE));
+                const obsoleteRgb = this.accessory.getServiceById(this.Service.Lightbulb, 'rgb_light');
+                if (obsoleteRgb) {
+                    this.accessory.removeService(obsoleteRgb);
+                }
             }
             else if (this.lightServiceType() === this.Service.Switch) {
                 (0, On_1.configureOn)(this, undefined, this.getSchema(...SCHEMA_CODE.LIGHT_ON));
@@ -67,8 +75,56 @@ class FanAccessory extends BaseAccessory_1.default {
                 if (unusedService) {
                     this.accessory.removeService(unusedService);
                 }
+                const obsoleteRgb = this.accessory.getServiceById(this.Service.Lightbulb, 'rgb_light');
+                if (obsoleteRgb) {
+                    this.accessory.removeService(obsoleteRgb);
+                }
             }
         }
+    }
+    hasSeparateRgbLight() {
+        // Verified from live Device Sharing MQTT for PID atfenlerda169ygw:
+        // DP20/switch_led controls the white lamp, DP24/colour_data carries
+        // the RGB HSV colour, and proprietary raw DP103 is the RGB power state
+        // exposed by the cloud specification as colour_switch. Keep the quirk
+        // product-scoped until another fan confirms the same wiring.
+        return this.device?.product_id === 'atfenlerda169ygw'
+            && !!this.getSchema(...SCHEMA_CODE.LIGHT_ON)
+            && !!this.getSchema(...SCHEMA_CODE.RGB_LIGHT_ON)
+            && !!this.getSchema(...SCHEMA_CODE.LIGHT_COLOR);
+    }
+    removeCharacteristicIfPresent(service, characteristicType) {
+        if (!service || !service.testCharacteristic(characteristicType)) {
+            return;
+        }
+        service.removeCharacteristic(service.getCharacteristic(characteristicType));
+    }
+    rgbLightService() {
+        return this.accessory.getServiceById(this.Service.Lightbulb, 'rgb_light')
+            || this.accessory.addService(this.Service.Lightbulb, `${this.accessory.displayName} RGB Light`, 'rgb_light');
+    }
+    configureSeparateWhiteAndRgbLights() {
+        const whiteOn = this.getSchema(...SCHEMA_CODE.LIGHT_ON);
+        const rgbOn = this.getSchema(...SCHEMA_CODE.RGB_LIGHT_ON);
+        const color = this.getSchema(...SCHEMA_CODE.LIGHT_COLOR);
+        const whiteService = this.lightService();
+        const rgbService = this.rgbLightService();
+        // v1.0.48/early-v1.0.49 used the un-subtyped light as one combined
+        // RGBCW service. Reuse that service as the white lamp so its HomeKit
+        // service identity stays stable, but remove RGB-only characteristics.
+        this.removeCharacteristicIfPresent(whiteService, this.Characteristic.Hue);
+        this.removeCharacteristicIfPresent(whiteService, this.Characteristic.Saturation);
+        (0, Light_1.configureLight)(this, whiteService, whiteOn, this.getSchema(...SCHEMA_CODE.LIGHT_BRIGHT), this.getSchema(...SCHEMA_CODE.LIGHT_TEMP), undefined, undefined);
+        // The decorative RGB channel is independent of the white lamp. The
+        // owner confirmed RGB brightness is not adjustable, so expose only
+        // On, Hue and Saturation and preserve colour_data.v unchanged.
+        (0, Light_1.configureLight)(this, rgbService, rgbOn, undefined, undefined, color, undefined, {
+            disableColorBrightness: true,
+            disableAdaptiveLighting: true,
+            preserveOffSchema: whiteOn,
+            preserveOffDelayMs: 180,
+        });
+        this.log.info('Detected dual-light fan firmware: exposing separate white and RGB HomeKit Lightbulb services.');
     }
     fanServiceType() {
         if (this.getSchema(...SCHEMA_CODE.FAN_LOCK)

@@ -1,6 +1,16 @@
+# 1.0.50
+
+- Reissued the corrected ceiling-fan dual-light/RGB build from 1.0.49 as a new npm-publishable version.
+- No functional changes from the corrected 1.0.49 build.
+
 # 1.0.49
 
-- Version bump of the 1.0.48 build for npm publishing. No functional changes from 1.0.48.
+- Corrected the ceiling-fan RGB implementation using live MQTT evidence from Tuya PID `atfenlerda169ygw` instead of treating the fan as one combined RGBCW lamp.
+- Exposes the existing un-subtyped fan light as the white lamp (`switch_led`, `bright_value`, `temp_value`) and adds a stable `rgb_light` HomeKit Lightbulb service for the separate decorative RGB channel (`colour_switch`, `colour_data`).
+- Added a narrow raw-DP compatibility mapping for this PID: MQTT reports such as `{"103":"off"}` are translated to `colour_switch=false`, so RGB on/off state can reach HomeKit even though Tuya omits `code`/`value` from that proprietary report.
+- RGB Hue/Saturation preserve the device's existing `colour_data.v`; no RGB Brightness characteristic is exposed because the owner confirmed RGB brightness is not adjustable.
+- When an RGB color change wakes the white LED while the white HomeKit light was off, the plugin sends a follow-up `switch_led=false`, matching the manual workaround reported from the Smart Life app.
+- Preserves the v1.0.47 alarm fixes, v1.0.46 blind state-machine fixes, Adaptive Lighting persistence, HomeKit name persistence, and independent MQTT debugging.
 
 # 1.0.48
 

@@ -193,7 +193,23 @@ function configureColourTemperature(accessory, service, lightType, tempSchema, m
     })
         .setProps(props);
 }
-function configureHue(accessory, service, lightType, colorSchema, modeSchema) {
+async function sendColorCommands(accessory, commands, options) {
+    const preserveOffSchema = options?.preserveOffSchema;
+    const preserveOff = !!preserveOffSchema && accessory.getStatus(preserveOffSchema.code)?.value === false;
+    if (!preserveOff) {
+        await accessory.sendCommands(commands, true);
+        return;
+    }
+    // This dual-light fan firmware wakes the white LED when the RGB colour DP
+    // changes. If HomeKit had the white lamp off before the colour change, send
+    // an explicit white-off command after the RGB update, mirroring what the
+    // Smart Life user currently has to do manually. Use real sequential cloud
+    // writes here so the corrective OFF cannot overtake the colour command.
+    await accessory.sendCommands(commands, false);
+    await new Promise(resolve => setTimeout(resolve, Number(options?.preserveOffDelayMs) || 180));
+    await accessory.sendCommands([{ code: preserveOffSchema.code, value: false }], false);
+}
+function configureHue(accessory, service, lightType, colorSchema, modeSchema, options) {
     const { min, max } = getColorChannelRange(colorSchema, 'h');
     service.getCharacteristic(accessory.Characteristic.Hue)
         .onGet(() => {
@@ -215,10 +231,10 @@ function configureHue(accessory, service, lightType, colorSchema, modeSchema) {
         if (modeSchema) {
             commands.push({ code: modeSchema.code, value: 'colour' });
         }
-        await accessory.sendCommands(commands, true);
+        await sendColorCommands(accessory, commands, options);
     });
 }
-function configureSaturation(accessory, service, lightType, colorSchema, modeSchema) {
+function configureSaturation(accessory, service, lightType, colorSchema, modeSchema, options) {
     const { min, max } = getColorChannelRange(colorSchema, 's');
     service.getCharacteristic(accessory.Characteristic.Saturation)
         .onGet(() => {
@@ -240,10 +256,10 @@ function configureSaturation(accessory, service, lightType, colorSchema, modeSch
         if (modeSchema) {
             commands.push({ code: modeSchema.code, value: 'colour' });
         }
-        await accessory.sendCommands(commands, true);
+        await sendColorCommands(accessory, commands, options);
     });
 }
-function configureLight(accessory, service, onSchema, brightSchema, tempSchema, colorSchema, modeSchema) {
+function configureLight(accessory, service, onSchema, brightSchema, tempSchema, colorSchema, modeSchema, options = {}) {
     if (!onSchema) {
         return;
     }
@@ -268,20 +284,24 @@ function configureLight(accessory, service, onSchema, brightSchema, tempSchema, 
             break;
         case LightType.RGB:
             (0, On_1.configureOn)(accessory, service, onSchema);
-            configureBrightness(accessory, service, lightType, brightSchema, colorSchema, modeSchema);
-            configureHue(accessory, service, lightType, colorSchema, modeSchema);
-            configureSaturation(accessory, service, lightType, colorSchema, modeSchema);
+            if (options.disableColorBrightness !== true) {
+                configureBrightness(accessory, service, lightType, brightSchema, colorSchema, modeSchema);
+            }
+            configureHue(accessory, service, lightType, colorSchema, modeSchema, options);
+            configureSaturation(accessory, service, lightType, colorSchema, modeSchema, options);
             break;
         case LightType.RGBC:
         case LightType.RGBCW:
             (0, On_1.configureOn)(accessory, service, onSchema);
             configureBrightness(accessory, service, lightType, brightSchema, colorSchema, modeSchema);
             configureColourTemperature(accessory, service, lightType, tempSchema, modeSchema);
-            configureHue(accessory, service, lightType, colorSchema, modeSchema);
-            configureSaturation(accessory, service, lightType, colorSchema, modeSchema);
+            configureHue(accessory, service, lightType, colorSchema, modeSchema, options);
+            configureSaturation(accessory, service, lightType, colorSchema, modeSchema, options);
             break;
     }
-    configureAdaptiveLighting(accessory, service, brightSchema, tempSchema);
+    if (options.disableAdaptiveLighting !== true) {
+        configureAdaptiveLighting(accessory, service, brightSchema, tempSchema);
+    }
 }
 function getAdaptiveLightingOverride(config) {
     if (!config || config.adaptiveLighting === undefined) {
