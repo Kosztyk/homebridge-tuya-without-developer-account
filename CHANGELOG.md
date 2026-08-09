@@ -1,3 +1,15 @@
+# 1.0.49
+
+- Version bump of the 1.0.48 build for npm publishing. No functional changes from 1.0.48.
+
+# 1.0.48
+
+- Fixed RGB/HSV detection for Tuya ceiling-fan lights whose standard `colour_data` or `colour_data_v2` schema reports an empty property object (`{}`).
+- Fan light services can now expose HomeKit Hue, Saturation and color-mode Brightness using Tuya `work_mode=colour` + `colour_data`, while preserving white brightness and color temperature through `work_mode=white`.
+- Added `colour_data_v2` support to `FanAccessory`.
+- Made Tuya HA MQTT connection lifecycle messages visible at info level for easier diagnostics.
+- Deliberately does not treat proprietary `colour_switch` as a second RGB-light power DP without proof; devices where it never changes continue to use the standard `switch_led`/`work_mode`/`colour_data` path.
+
 # 1.0.47
 
 - Fixed Security System service naming. Empty cached names no longer fall through to the accidental `Tuya Service` placeholder, and existing `Tuya Service` / generic `Security System` names are repaired to the actual Tuya alarm device name on startup.

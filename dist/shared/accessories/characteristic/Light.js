@@ -15,17 +15,45 @@ var LightType;
     LightType["RGBC"] = "RGBC";
     LightType["RGBCW"] = "RGBCW";
 })(LightType || (LightType = {}));
+function getColorChannelRange(colorSchema, channel) {
+    const property = colorSchema?.property || {};
+    const declared = property[channel];
+    if (declared && Number.isFinite(Number(declared.min)) && Number.isFinite(Number(declared.max))) {
+        return {
+            min: Number(declared.min),
+            max: Number(declared.max),
+        };
+    }
+    // Tuya's standard `colour_data` / `colour_data_v2` JSON schema is often
+    // published with an empty property object (`{}`). The payload itself is
+    // HSV. For that standard form Hue uses 0..360 and Saturation/Value use
+    // 0..1000. Use those ranges as a compatibility fallback rather than
+    // dropping Hue/Saturation from HomeKit entirely.
+    if (channel === 'h') {
+        return { min: 0, max: 360 };
+    }
+    return { min: 0, max: 1000 };
+}
+function hasUsableColorSchema(colorSchema) {
+    if (!colorSchema) {
+        return false;
+    }
+    const code = String(colorSchema.code || '').toLowerCase();
+    return code === 'colour_data'
+        || code === 'colour_data_v2'
+        || !!(colorSchema.property?.h && colorSchema.property?.s && colorSchema.property?.v);
+}
 function getLightType(accessory, on, bright, temp, color, mode) {
     const modeRange = mode && mode.property.range;
-    const { h, s, v } = (color?.property || {});
+    const colorCapable = hasUsableColorSchema(color);
     let lightType;
-    if (on && bright && temp && h && s && v && modeRange && modeRange.includes('colour') && modeRange.includes('white')) {
+    if (on && bright && temp && colorCapable && modeRange && modeRange.includes('colour') && modeRange.includes('white')) {
         lightType = LightType.RGBCW;
     }
-    else if (on && bright && !temp && h && s && v && modeRange && modeRange.includes('colour') && modeRange.includes('white')) {
+    else if (on && bright && !temp && colorCapable && modeRange && modeRange.includes('colour') && modeRange.includes('white')) {
         lightType = LightType.RGBC;
     }
-    else if (on && !temp && h && s && v) {
+    else if (on && !temp && colorCapable) {
         lightType = LightType.RGB;
     }
     else if (on && bright && temp) {
@@ -47,12 +75,18 @@ function getColorValue(accessory, schema) {
     if (!status || !status.value || status.value === '' || status.value === '{}') {
         return { h: 0, s: 0, v: 0 };
     }
-    const { h, s, v } = JSON.parse(status.value);
-    return {
-        h: h,
-        s: s,
-        v: v,
-    };
+    try {
+        const raw = typeof status.value === 'string' ? JSON.parse(status.value) : status.value;
+        return {
+            h: Number.isFinite(Number(raw?.h)) ? Number(raw.h) : 0,
+            s: Number.isFinite(Number(raw?.s)) ? Number(raw.s) : 0,
+            v: Number.isFinite(Number(raw?.v)) ? Number(raw.v) : 0,
+        };
+    }
+    catch (error) {
+        accessory.log.warn(`Could not parse ${schema.code} as Tuya HSV JSON: ${error instanceof Error ? error.message : error}`);
+        return { h: 0, s: 0, v: 0 };
+    }
 }
 function inWhiteMode(accessory, lightType, modeSchema) {
     if (lightType === LightType.C || lightType === LightType.CW) {
@@ -85,7 +119,7 @@ function configureBrightness(accessory, service, lightType, brightSchema, colorS
         .onGet(() => {
         if (inColorMode(accessory, lightType, modeSchema) && colorSchema) {
             // Color mode, get brightness from `color_data.v`
-            const { max } = colorSchema.property.v;
+            const { max } = getColorChannelRange(colorSchema, 'v');
             const colorValue = getColorValue(accessory, colorSchema);
             const value = Math.round(100 * colorValue.v / max);
             return (0, util_1.limit)(value, 0, 100);
@@ -106,7 +140,7 @@ function configureBrightness(accessory, service, lightType, brightSchema, colorS
         accessory.log.debug(`Characteristic.Brightness set to: ${value}`);
         if (inColorMode(accessory, lightType, modeSchema) && colorSchema) {
             // Color mode, set brightness to `color_data.v`
-            const { min, max } = colorSchema.property.v;
+            const { min, max } = getColorChannelRange(colorSchema, 'v');
             const colorValue = getColorValue(accessory, colorSchema);
             colorValue.v = Math.round(value * max / 100);
             colorValue.v = (0, util_1.limit)(colorValue.v, min, max);
@@ -160,7 +194,7 @@ function configureColourTemperature(accessory, service, lightType, tempSchema, m
         .setProps(props);
 }
 function configureHue(accessory, service, lightType, colorSchema, modeSchema) {
-    const { min, max } = colorSchema.property.h;
+    const { min, max } = getColorChannelRange(colorSchema, 'h');
     service.getCharacteristic(accessory.Characteristic.Hue)
         .onGet(() => {
         if (inWhiteMode(accessory, lightType, modeSchema)) {
@@ -185,7 +219,7 @@ function configureHue(accessory, service, lightType, colorSchema, modeSchema) {
     });
 }
 function configureSaturation(accessory, service, lightType, colorSchema, modeSchema) {
-    const { min, max } = colorSchema.property.s;
+    const { min, max } = getColorChannelRange(colorSchema, 's');
     service.getCharacteristic(accessory.Characteristic.Saturation)
         .onGet(() => {
         if (inWhiteMode(accessory, lightType, modeSchema)) {

@@ -61,7 +61,7 @@ class TuyaHASharingMQ {
         const url = new url_1.URL(this.config.url);
         const protocol = url.protocol === 'ssl:' ? 'mqtts' : url.protocol.replace(':', '') || 'mqtt';
         const connectUrl = `${protocol}://${url.hostname}:${url.port}`;
-        this.log.debug('Connecting to Tuya HA MQTT: %s', connectUrl);
+        this.log.info('Connecting to Tuya HA MQTT: %s', connectUrl);
         const client = mqtt_1.default.connect(connectUrl, {
             clientId: this.config.clientId,
             username: this.config.username,
@@ -76,7 +76,7 @@ class TuyaHASharingMQ {
         this.reconnectTimer = setTimeout(() => this.connect().catch(error => this.log.error('Tuya HA MQTT reconnect failed: %s', error.message)), timeout * 1000);
     }
     onConnect() {
-        this.log.debug('Tuya HA MQTT connected');
+        this.log.info('Tuya HA MQTT connected');
         if (!this.client || !this.config) {
             return;
         }

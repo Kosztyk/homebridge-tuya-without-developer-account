@@ -22,7 +22,7 @@ const SCHEMA_CODE = {
     LIGHT_MODE: ['work_mode'],
     LIGHT_BRIGHT: ['bright_value', 'bright_value_v2'],
     LIGHT_TEMP: ['temp_value', 'temp_value_v2'],
-    LIGHT_COLOR: ['colour_data'],
+    LIGHT_COLOR: ['colour_data', 'colour_data_v2'],
 };
 class FanAccessory extends BaseAccessory_1.default {
     requiredSchema() {
