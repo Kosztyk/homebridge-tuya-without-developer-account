@@ -78,6 +78,18 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             }
             return 35;
         };
+        const firstOptionalNumber = (...values) => {
+            for (const value of values) {
+                if (value === undefined || value === null || value === '') {
+                    continue;
+                }
+                const number = Number(value);
+                if (Number.isFinite(number)) {
+                    return number;
+                }
+            }
+            return undefined;
+        };
         return {
             invertPosition: firstBoolean(channelConfig?.invertPosition, windowCovering?.invertPosition, deviceConfig?.invertPosition),
             reverseControl: firstBoolean(channelConfig?.reverseControl, windowCovering?.reverseControl, deviceConfig?.reverseControl, deviceConfig?.reverse),
@@ -88,6 +100,8 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
             doubleClickToClose: firstBooleanDefault(true, channelConfig?.doubleClickToClose, windowCovering?.doubleClickToClose, deviceConfig?.doubleClickToClose),
             travelSeconds: (0, util_1.limit)(firstNumber(channelConfig?.travelSeconds, windowCovering?.travelSeconds, deviceConfig?.travelSeconds, channelConfig?.settleSeconds, windowCovering?.settleSeconds, deviceConfig?.settleSeconds), 5, 180),
             estimatePositionOnStop: firstBooleanDefault(true, channelConfig?.estimatePositionOnStop, windowCovering?.estimatePositionOnStop, deviceConfig?.estimatePositionOnStop),
+            openPositionThreshold: (0, util_1.limit)(firstOptionalNumber(channelConfig?.openPositionThreshold, windowCovering?.openPositionThreshold, deviceConfig?.openPositionThreshold) ?? 100, 50, 100),
+            closedPositionThreshold: (0, util_1.limit)(firstOptionalNumber(channelConfig?.closedPositionThreshold, windowCovering?.closedPositionThreshold, deviceConfig?.closedPositionThreshold) ?? 0, 0, 50),
         };
     }
     toLimitedPosition(value, fallback = 50) {
@@ -97,9 +111,23 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         }
         return (0, util_1.limit)(number, 0, 100);
     }
+    normalizeHomeKitEndpointPosition(value, i = 0) {
+        const position = this.toLimitedPosition(value);
+        const options = this.getWindowCoveringOptions(i);
+        const openThreshold = this.toLimitedPosition(options.openPositionThreshold, 100);
+        const closedThreshold = this.toLimitedPosition(options.closedPositionThreshold, 0);
+        if (position >= openThreshold) {
+            return 100;
+        }
+        if (position <= closedThreshold) {
+            return 0;
+        }
+        return position;
+    }
     rawPositionToHomeKit(value, i = 0) {
         const position = this.toLimitedPosition(value);
-        return this.getWindowCoveringOptions(i).invertPosition ? 100 - position : position;
+        const converted = this.getWindowCoveringOptions(i).invertPosition ? 100 - position : position;
+        return this.normalizeHomeKitEndpointPosition(converted, i);
     }
     homeKitPositionToRaw(value, i = 0) {
         const position = this.toLimitedPosition(value);
@@ -136,7 +164,15 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         if (!this.targetPosition) {
             this.targetPosition = {};
         }
-        const target = this.toLimitedPosition(targetPosition);
+        if (!this.lastMovementDirections) {
+            this.lastMovementDirections = new Map();
+        }
+        const currentPosition = this.getCurrentHomeKitPosition(i);
+        const target = this.normalizeHomeKitEndpointPosition(targetPosition, i);
+        const direction = this.getDirectionBetween(currentPosition, target);
+        if (direction) {
+            this.lastMovementDirections.set(i, direction);
+        }
         this.externalMovementTargets.set(i, target);
         this.externalMovementForceFinalStates.set(i, !!options.forceFinalState);
         this.targetPosition[i] = target;
@@ -173,7 +209,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         if (targetControlSchema) {
             return this.getControlPosition(this.getStatus(targetControlSchema.code)?.value, i);
         }
-        return this.targetPosition?.[i] ?? 50;
+        return this.normalizeHomeKitEndpointPosition(this.targetPosition?.[i] ?? 50, i);
     }
     scheduleStartupMovementReconcile(amount = 1) {
         if (this.startupMovementTimer) {
@@ -265,19 +301,108 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         }
         return true;
     }
+    getDirectionBetween(startPosition, targetPosition) {
+        const start = this.toLimitedPosition(startPosition);
+        const target = this.toLimitedPosition(targetPosition);
+        if (target > start + 1) {
+            return 1;
+        }
+        if (target < start - 1) {
+            return -1;
+        }
+        return 0;
+    }
     markMovementStart(i, startPosition, targetPosition) {
         this.clearStoppedHold(i);
         if (!this.movementStarts) {
             this.movementStarts = new Map();
         }
+        if (!this.lastMovementDirections) {
+            this.lastMovementDirections = new Map();
+        }
+        const start = this.toLimitedPosition(startPosition);
+        const target = this.toLimitedPosition(targetPosition);
         this.movementStarts.set(i, {
-            startPosition: this.toLimitedPosition(startPosition),
-            targetPosition: this.toLimitedPosition(targetPosition),
+            startPosition: start,
+            targetPosition: target,
             startedAt: Date.now(),
         });
+        const direction = this.getDirectionBetween(start, target);
+        if (direction) {
+            this.lastMovementDirections.set(i, direction);
+        }
     }
     clearMovementStart(i) {
         this.movementStarts?.delete(i);
+    }
+    getMovementDirectionBeforeStop(i, currentPosition) {
+        const movementStart = this.movementStarts?.get(i);
+        if (movementStart) {
+            const direction = this.getDirectionBetween(movementStart.startPosition, movementStart.targetPosition);
+            if (direction) {
+                return direction;
+            }
+        }
+        const externalTarget = this.getExternalMovementTarget(i);
+        if (externalTarget !== undefined) {
+            const direction = this.getDirectionBetween(currentPosition, externalTarget);
+            if (direction) {
+                return direction;
+            }
+        }
+        const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
+        const controlStatus = controlSchema ? this.getStatus(controlSchema.code) : undefined;
+        if (controlSchema && this.isControlMoving(controlStatus?.value)) {
+            const commandTarget = this.getControlPosition(controlStatus?.value, i);
+            const direction = this.getDirectionBetween(currentPosition, commandTarget);
+            if (direction) {
+                return direction;
+            }
+        }
+        const lastDirection = this.lastMovementDirections?.get(i);
+        return lastDirection === 1 || lastDirection === -1 ? lastDirection : 0;
+    }
+    getResumeDirection(i, currentPosition, requestedTarget) {
+        const stoppedDirection = this.lastStoppedDirections?.get(i);
+        if (stoppedDirection === 1 || stoppedDirection === -1) {
+            return stoppedDirection;
+        }
+        const requestedDirection = this.getDirectionBetween(currentPosition, requestedTarget);
+        if (requestedDirection) {
+            return requestedDirection;
+        }
+        const current = this.normalizeHomeKitEndpointPosition(currentPosition, i);
+        if (current <= 0) {
+            return 1;
+        }
+        if (current >= 100) {
+            return -1;
+        }
+        return 1;
+    }
+    clearPartialResumeTapWindow(i) {
+        this.partialResumeTapUntil?.delete(i);
+        this.partialResumeDirections?.delete(i);
+    }
+    armPartialResumeTapWindow(i, direction, now = Date.now()) {
+        if (!this.partialResumeTapUntil) {
+            this.partialResumeTapUntil = new Map();
+        }
+        if (!this.partialResumeDirections) {
+            this.partialResumeDirections = new Map();
+        }
+        this.partialResumeDirections.set(i, direction === -1 ? -1 : 1);
+        this.partialResumeTapUntil.set(i, now + 650);
+    }
+    getDoubleTapReverseDirection(i, now = Date.now()) {
+        if ((this.partialResumeTapUntil?.get(i) ?? 0) <= now) {
+            return 0;
+        }
+        const direction = this.partialResumeDirections?.get(i);
+        if (direction !== 1 && direction !== -1) {
+            return 0;
+        }
+        return -direction;
     }
     isPartialHomeKitPosition(position) {
         const value = this.toLimitedPosition(position);
@@ -322,8 +447,16 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         const targetSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_PERCENT);
         const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
         const options = this.getWindowCoveringOptions(i);
-        const currentPosition = this.toLimitedPosition(position ?? (options.estimatePositionOnStop === false ? this.getCurrentHomeKitPosition(i) : this.getEstimatedHomeKitPosition(i)));
+        const currentPosition = this.normalizeHomeKitEndpointPosition(position ?? (options.estimatePositionOnStop === false ? this.getCurrentHomeKitPosition(i) : this.getEstimatedHomeKitPosition(i)), i);
+        const stoppedDirection = this.getMovementDirectionBeforeStop(i, currentPosition);
+        if (stoppedDirection) {
+            if (!this.lastStoppedDirections) {
+                this.lastStoppedDirections = new Map();
+            }
+            this.lastStoppedDirections.set(i, stoppedDirection);
+        }
         this.clearMovementStart(i);
+        this.clearPartialResumeTapWindow(i);
         this.markStoppedHold(i);
         if (!this.targetPosition) {
             this.targetPosition = {};
@@ -351,8 +484,8 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
     async stopAtCurrentPosition(i, controlSchema, targetSchema, reason = 'tap') {
         this.clearExternalMovementTimer(i);
         this.clearHomeKitMovementTimer(i);
-        this.clearExternalMovementTarget(i);
         const currentPosition = this.setLocalStoppedAtCurrentPosition(i);
+        this.clearExternalMovementTarget(i);
         const commands = [];
         if (controlSchema) {
             commands.push({ code: controlSchema.code, value: this.getStopCommandForControlSchema(controlSchema) });
@@ -444,7 +577,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
         service.getCharacteristic(this.Characteristic.CurrentPosition)
             .onGet(() => {
             if (this.isStoppedHoldActive(i) && this.targetPosition?.[i] !== undefined) {
-                return this.targetPosition[i];
+                return this.normalizeHomeKitEndpointPosition(this.targetPosition[i], i);
             }
             if (currentSchema) {
                 const status = this.getStatus(currentSchema.code);
@@ -479,7 +612,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 return externalTarget;
             }
             if (this.targetPosition?.[i] !== undefined && this.getPositionStateValue(i) === this.Characteristic.PositionState.STOPPED) {
-                return this.targetPosition[i];
+                return this.normalizeHomeKitEndpointPosition(this.targetPosition[i], i);
             }
             const status = this.getStatus(schema.code);
             return this.rawPositionToHomeKit(status?.value, i);
@@ -489,16 +622,24 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 this.targetPosition = {};
             }
             let targetPosition = this.toLimitedPosition(value);
-            const currentPosition = this.getCurrentHomeKitPosition(i);
+            const liveCurrentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
+            const currentPosition = this.movementStarts?.get(i) && !liveCurrentSchema
+                ? this.getEstimatedHomeKitPosition(i)
+                : this.getCurrentHomeKitPosition(i);
             const options = this.getWindowCoveringOptions(i);
             const now = Date.now();
             const endpointTap = targetPosition <= 5 || targetPosition >= 95;
             const isPartial = this.isPartialHomeKitPosition(currentPosition);
             const wasStopped = this.getPositionStateValue(i) === this.Characteristic.PositionState.STOPPED;
+            let reversedByDoubleTap = false;
             if (this.shouldStopOnTargetTap(i, targetPosition)) {
-                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i] && endpointTap) {
-                    targetPosition = 0;
-                    this.partialOpenDoubleClickUntil[i] = 0;
+                const reverseDirection = options.doubleClickToClose !== false && endpointTap
+                    ? this.getDoubleTapReverseDirection(i, now)
+                    : 0;
+                if (reverseDirection) {
+                    targetPosition = reverseDirection > 0 ? 100 : 0;
+                    this.clearPartialResumeTapWindow(i);
+                    reversedByDoubleTap = true;
                 }
                 else {
                     const controlSchema = this.getSchema(...SCHEMA_CODE[i].TARGET_POSITION_CONTROL);
@@ -506,24 +647,18 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                     return;
                 }
             }
-            if (!this.partialOpenDoubleClickUntil) {
-                this.partialOpenDoubleClickUntil = {};
-            }
-            if (wasStopped && isPartial && endpointTap) {
-                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i]) {
-                    targetPosition = 0;
-                    this.partialOpenDoubleClickUntil[i] = 0;
+            if (!reversedByDoubleTap && wasStopped && isPartial && endpointTap) {
+                const resumeDirection = this.getResumeDirection(i, currentPosition, targetPosition);
+                targetPosition = resumeDirection > 0 ? 100 : 0;
+                if (options.doubleClickToClose !== false) {
+                    this.armPartialResumeTapWindow(i, resumeDirection, now);
                 }
                 else {
-                    targetPosition = 100;
-                    this.partialOpenDoubleClickUntil[i] = options.doubleClickToClose === false ? 0 : now + 650;
+                    this.clearPartialResumeTapWindow(i);
                 }
             }
-            else if (isPartial && targetPosition >= 95 && options.doubleClickToClose !== false) {
-                this.partialOpenDoubleClickUntil[i] = now + 650;
-            }
-            else {
-                this.partialOpenDoubleClickUntil[i] = 0;
+            else if (!reversedByDoubleTap) {
+                this.clearPartialResumeTapWindow(i);
             }
             this.clearStoppedHold(i);
             this.targetPosition[i] = targetPosition;
@@ -551,7 +686,7 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 return externalTarget;
             }
             if (this.targetPosition?.[i] !== undefined && this.getPositionStateValue(i) === this.Characteristic.PositionState.STOPPED) {
-                return this.targetPosition[i];
+                return this.normalizeHomeKitEndpointPosition(this.targetPosition[i], i);
             }
             const status = this.getStatus(schema.code);
             return this.getControlPosition(status?.value, i);
@@ -561,40 +696,42 @@ class WindowCoveringAccessory extends BaseAccessory_1.default {
                 this.targetPosition = {};
             }
             let targetPosition = this.toLimitedPosition(value);
-            const currentPosition = this.getCurrentHomeKitPosition(i);
+            const liveCurrentSchema = this.getSchema(...SCHEMA_CODE[i].CURRENT_POSITION);
+            const currentPosition = this.movementStarts?.get(i) && !liveCurrentSchema
+                ? this.getEstimatedHomeKitPosition(i)
+                : this.getCurrentHomeKitPosition(i);
             const options = this.getWindowCoveringOptions(i);
             const now = Date.now();
             const endpointTap = targetPosition <= 5 || targetPosition >= 95;
             const isPartial = this.isPartialHomeKitPosition(currentPosition);
             const wasStopped = this.getPositionStateValue(i) === this.Characteristic.PositionState.STOPPED;
+            let reversedByDoubleTap = false;
             if (this.shouldStopOnTargetTap(i, targetPosition)) {
-                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i] && endpointTap) {
-                    targetPosition = 0;
-                    this.partialOpenDoubleClickUntil[i] = 0;
+                const reverseDirection = options.doubleClickToClose !== false && endpointTap
+                    ? this.getDoubleTapReverseDirection(i, now)
+                    : 0;
+                if (reverseDirection) {
+                    targetPosition = reverseDirection > 0 ? 100 : 0;
+                    this.clearPartialResumeTapWindow(i);
+                    reversedByDoubleTap = true;
                 }
                 else {
                     await this.stopAtCurrentPosition(i, schema, undefined, 'tap-to-stop');
                     return;
                 }
             }
-            if (!this.partialOpenDoubleClickUntil) {
-                this.partialOpenDoubleClickUntil = {};
-            }
-            if (wasStopped && isPartial && endpointTap) {
-                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil?.[i] && now < this.partialOpenDoubleClickUntil[i]) {
-                    targetPosition = 0;
-                    this.partialOpenDoubleClickUntil[i] = 0;
+            if (!reversedByDoubleTap && wasStopped && isPartial && endpointTap) {
+                const resumeDirection = this.getResumeDirection(i, currentPosition, targetPosition);
+                targetPosition = resumeDirection > 0 ? 100 : 0;
+                if (options.doubleClickToClose !== false) {
+                    this.armPartialResumeTapWindow(i, resumeDirection, now);
                 }
                 else {
-                    targetPosition = 100;
-                    this.partialOpenDoubleClickUntil[i] = options.doubleClickToClose === false ? 0 : now + 650;
+                    this.clearPartialResumeTapWindow(i);
                 }
             }
-            else if (isPartial && targetPosition >= 95 && options.doubleClickToClose !== false) {
-                this.partialOpenDoubleClickUntil[i] = now + 650;
-            }
-            else {
-                this.partialOpenDoubleClickUntil[i] = 0;
+            else if (!reversedByDoubleTap) {
+                this.clearPartialResumeTapWindow(i);
             }
             this.clearStoppedHold(i);
             this.targetPosition[i] = targetPosition;

@@ -260,8 +260,8 @@
 
   <div class="form-check mb-2">
     <input id="tuyaNodevCoverDoubleClickToClose" class="form-check-input" type="checkbox" checked>
-    <label class="form-check-label" for="tuyaNodevCoverDoubleClickToClose">Partial-open double tap closes</label>
-    <small class="form-text text-muted">Best-effort helper: from a partial position, first tap continues opening; a very quick second tap tries to close instead. Apple Home may not always emit a second identical tap event.</small>
+    <label class="form-check-label" for="tuyaNodevCoverDoubleClickToClose">Partial-stop double tap reverses direction</label>
+    <small class="form-text text-muted">After stopping part-way, one tap resumes the same direction. A very quick second tap reverses it: opening → closing, or closing → opening. Apple Home exposes TargetPosition writes rather than a dedicated double-tap event, so this remains best-effort.</small>
   </div>
 
   <div class="form-check mb-2">
@@ -274,6 +274,18 @@
     <label for="tuyaNodevCoverTravelSeconds">Estimated full travel time</label>
     <input id="tuyaNodevCoverTravelSeconds" class="form-control" type="number" min="5" max="180" step="1" placeholder="35">
     <small class="form-text text-muted">Seconds for a full open-to-close movement. Used only for stop-position estimation. Leave blank for default.</small>
+  </div>
+
+  <div class="form-group">
+    <label for="tuyaNodevCoverOpenThreshold">Treat as fully open at or above (%)</label>
+    <input id="tuyaNodevCoverOpenThreshold" class="form-control" type="number" min="50" max="100" step="1" placeholder="100">
+    <small class="form-text text-muted">For a motor that is physically fully open but reports, for example, 94%, enter <strong>94</strong>. HomeKit will then see 94–100 as fully open (100%). Leave blank for exact 100% reporting.</small>
+  </div>
+
+  <div class="form-group">
+    <label for="tuyaNodevCoverClosedThreshold">Treat as fully closed at or below (%)</label>
+    <input id="tuyaNodevCoverClosedThreshold" class="form-control" type="number" min="0" max="50" step="1" placeholder="0">
+    <small class="form-text text-muted">Use only if the blind is physically fully closed but Tuya reports a value above 0. Leave blank for exact 0% reporting.</small>
   </div>
 
   <div class="tuya-nodev-actions">
@@ -295,11 +307,13 @@
           <th>Invert position</th>
           <th>Reverse control</th>
           <th>Tuya app mapping</th>
+          <th>Full open</th>
+          <th>Full closed</th>
           <th></th>
         </tr>
       </thead>
       <tbody id="tuyaNodevCoverOverrideRows">
-        <tr><td colspan="6" class="tuya-nodev-small">No blind/window-covering overrides configured.</td></tr>
+        <tr><td colspan="8" class="tuya-nodev-small">No blind/window-covering overrides configured.</td></tr>
       </tbody>
     </table>
   </div>
@@ -863,7 +877,7 @@
     if (!tbody) return;
     const overrides = getCoverOverrides();
     if (!overrides.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="tuya-nodev-small">No blind/window-covering overrides configured.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="tuya-nodev-small">No blind/window-covering overrides configured.</td></tr>';
       return;
     }
     tbody.innerHTML = overrides.map((override) => {
@@ -876,6 +890,8 @@
           <td>${cover.invertPosition === true ? 'Yes' : 'No'}</td>
           <td>${cover.reverseControl === true ? 'Yes' : 'No'}</td>
           <td>${escapeHtml(cover.externalControlStateMode || 'normal')}</td>
+          <td>${Number.isFinite(Number(cover.openPositionThreshold)) ? `≥ ${escapeHtml(String(cover.openPositionThreshold))}%` : '100%'}</td>
+          <td>${Number.isFinite(Number(cover.closedPositionThreshold)) ? `≤ ${escapeHtml(String(cover.closedPositionThreshold))}%` : '0%'}</td>
           <td><button class="btn btn-sm btn-outline-secondary tuya-nodev-edit-cover" type="button" data-id="${escapeHtml(override.id)}">Edit</button></td>
         </tr>`;
     }).join('');
@@ -902,6 +918,8 @@
     if ($('tuyaNodevCoverDoubleClickToClose')) $('tuyaNodevCoverDoubleClickToClose').checked = override.windowCovering?.doubleClickToClose !== false;
     if ($('tuyaNodevCoverEstimateStop')) $('tuyaNodevCoverEstimateStop').checked = override.windowCovering?.estimatePositionOnStop !== false;
     if ($('tuyaNodevCoverTravelSeconds')) $('tuyaNodevCoverTravelSeconds').value = Number.isFinite(Number(override.windowCovering?.travelSeconds)) ? String(Math.max(5, Math.min(180, Math.round(Number(override.windowCovering.travelSeconds))))) : '';
+    if ($('tuyaNodevCoverOpenThreshold')) $('tuyaNodevCoverOpenThreshold').value = Number.isFinite(Number(override.windowCovering?.openPositionThreshold)) ? String(Math.max(50, Math.min(100, Math.round(Number(override.windowCovering.openPositionThreshold))))) : '';
+    if ($('tuyaNodevCoverClosedThreshold')) $('tuyaNodevCoverClosedThreshold').value = Number.isFinite(Number(override.windowCovering?.closedPositionThreshold)) ? String(Math.max(0, Math.min(50, Math.round(Number(override.windowCovering.closedPositionThreshold))))) : '';
     if ($('tuyaNodevCoverExternalMode')) {
       $('tuyaNodevCoverExternalMode').value = override.windowCovering?.externalControlStateMode || 'normal';
     }
@@ -927,14 +945,24 @@
     const doubleClickToClose = $('tuyaNodevCoverDoubleClickToClose')?.checked !== false;
     const estimatePositionOnStop = $('tuyaNodevCoverEstimateStop')?.checked !== false;
     const travelSeconds = Number($('tuyaNodevCoverTravelSeconds')?.value);
+    const openPositionThreshold = Number($('tuyaNodevCoverOpenThreshold')?.value);
+    const closedPositionThreshold = Number($('tuyaNodevCoverClosedThreshold')?.value);
     const override = ensureDeviceOverride(id);
     const existingSettleSeconds = Number(override.windowCovering?.settleSeconds);
     const hasExternalMode = externalControlStateMode && externalControlStateMode !== 'normal';
     const hasTravelSeconds = Number.isFinite(travelSeconds) && travelSeconds >= 5;
-    if (invertPosition || reverseControl || hasExternalMode || tapToStop !== true || doubleClickToClose !== true || estimatePositionOnStop !== true || hasTravelSeconds || Number.isFinite(existingSettleSeconds)) {
+    const hasOpenThreshold = Number.isFinite(openPositionThreshold) && openPositionThreshold >= 50 && openPositionThreshold < 100;
+    const hasClosedThreshold = Number.isFinite(closedPositionThreshold) && closedPositionThreshold > 0 && closedPositionThreshold <= 50;
+    if (invertPosition || reverseControl || hasExternalMode || tapToStop !== true || doubleClickToClose !== true || estimatePositionOnStop !== true || hasTravelSeconds || hasOpenThreshold || hasClosedThreshold || Number.isFinite(existingSettleSeconds)) {
       override.windowCovering = { invertPosition, reverseControl, externalControlStateMode, tapToStop, doubleClickToClose, estimatePositionOnStop };
       if (hasTravelSeconds) {
         override.windowCovering.travelSeconds = Math.max(5, Math.min(180, Math.round(travelSeconds)));
+      }
+      if (hasOpenThreshold) {
+        override.windowCovering.openPositionThreshold = Math.max(50, Math.min(100, Math.round(openPositionThreshold)));
+      }
+      if (hasClosedThreshold) {
+        override.windowCovering.closedPositionThreshold = Math.max(0, Math.min(50, Math.round(closedPositionThreshold)));
       }
       if (Number.isFinite(existingSettleSeconds)) {
         override.windowCovering.settleSeconds = Math.max(5, Math.min(180, Math.round(existingSettleSeconds)));
@@ -943,7 +971,7 @@
     } else {
       delete override.windowCovering;
       removeEmptyDeviceOverride(id);
-      setCoverStatus('Both options are disabled, so the blind override was removed.', 'info');
+      setCoverStatus('All blind override options are at their defaults, so the blind override was removed.', 'info');
     }
     await syncConfigToUi();
     markDirty();
@@ -2017,6 +2045,10 @@
         if ($('tuyaNodevCoverExternalMode')) $('tuyaNodevCoverExternalMode').value = override?.windowCovering?.externalControlStateMode || 'normal';
         if ($('tuyaNodevCoverTapToStop')) $('tuyaNodevCoverTapToStop').checked = override?.windowCovering?.tapToStop !== false;
         if ($('tuyaNodevCoverDoubleClickToClose')) $('tuyaNodevCoverDoubleClickToClose').checked = override?.windowCovering?.doubleClickToClose !== false;
+        if ($('tuyaNodevCoverEstimateStop')) $('tuyaNodevCoverEstimateStop').checked = override?.windowCovering?.estimatePositionOnStop !== false;
+        if ($('tuyaNodevCoverTravelSeconds')) $('tuyaNodevCoverTravelSeconds').value = Number.isFinite(Number(override?.windowCovering?.travelSeconds)) ? String(Math.max(5, Math.min(180, Math.round(Number(override.windowCovering.travelSeconds))))) : '';
+        if ($('tuyaNodevCoverOpenThreshold')) $('tuyaNodevCoverOpenThreshold').value = Number.isFinite(Number(override?.windowCovering?.openPositionThreshold)) ? String(Math.max(50, Math.min(100, Math.round(Number(override.windowCovering.openPositionThreshold))))) : '';
+        if ($('tuyaNodevCoverClosedThreshold')) $('tuyaNodevCoverClosedThreshold').value = Number.isFinite(Number(override?.windowCovering?.closedPositionThreshold)) ? String(Math.max(0, Math.min(50, Math.round(Number(override.windowCovering.closedPositionThreshold))))) : '';
       });
       $('tuyaNodevApplySwitchNames').addEventListener('click', addOrUpdateSwitchNames);
       $('tuyaNodevRemoveSwitchNames').addEventListener('click', removeSelectedSwitchNames);

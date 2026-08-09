@@ -305,8 +305,9 @@
                           },
                           "doubleClickToClose": {
                             "type": "boolean",
-                            "title": "Partial-open double tap closes",
-                            "default": true
+                            "title": "Partial-stop double tap reverses direction",
+                            "default": true,
+                            "description": "After a partial stop, one tap resumes the last direction and a very quick second tap reverses it."
                           },
                           "travelSeconds": {
                             "type": "integer",
@@ -321,6 +322,22 @@
                             "title": "Estimate partial position when stopped",
                             "description": "When enabled, if Tuya does not report a live position while moving, Homebridge estimates the current partial position when you tap to stop so Apple Home does not remain stuck as Opening/Closing.",
                             "default": true
+                          },
+                          "openPositionThreshold": {
+                            "type": "integer",
+                            "title": "Treat as fully open at or above (%)",
+                            "description": "If a calibrated Tuya blind physically reaches its fully open end stop while reporting less than 100 (for example 94), set that reported HomeKit-facing percentage here. Values at or above it are exposed to HomeKit as 100. Leave at 100 for exact reporting.",
+                            "default": 100,
+                            "minimum": 50,
+                            "maximum": 100
+                          },
+                          "closedPositionThreshold": {
+                            "type": "integer",
+                            "title": "Treat as fully closed at or below (%)",
+                            "description": "If a calibrated Tuya blind physically reaches its fully closed end stop while reporting above 0, set that reported HomeKit-facing percentage here. Values at or below it are exposed to HomeKit as 0. Leave at 0 for exact reporting.",
+                            "default": 0,
+                            "minimum": 0,
+                            "maximum": 50
                           }
                         }
                       }
@@ -353,8 +370,8 @@
                     },
                     "doubleClickToClose": {
                       "type": "boolean",
-                      "title": "Partial-open double tap closes",
-                      "description": "Best-effort helper for Apple Home: from a partial position, first tap continues opening; a very quick second tap tries to close instead. Apple Home may not always emit a second identical tap event.",
+                      "title": "Partial-stop double tap reverses direction",
+                      "description": "Best-effort Apple Home tile behavior: after a blind is stopped at a partial position, one tap resumes the same direction; a very quick second tap reverses it. Apple Home exposes TargetPosition writes rather than a dedicated double-tap event.",
                       "default": true
                     },
                     "travelSeconds": {
@@ -370,6 +387,22 @@
                       "title": "Estimate partial position when stopped",
                       "description": "When enabled, if Tuya does not report a live position while moving, Homebridge estimates the current partial position when you tap to stop so Apple Home does not remain stuck as Opening/Closing.",
                       "default": true
+                    },
+                    "openPositionThreshold": {
+                      "type": "integer",
+                      "title": "Treat as fully open at or above (%)",
+                      "description": "If a calibrated Tuya blind physically reaches its fully open end stop while reporting less than 100 (for example 94), set that reported HomeKit-facing percentage here. Values at or above it are exposed to HomeKit as 100. Leave at 100 for exact reporting.",
+                      "default": 100,
+                      "minimum": 50,
+                      "maximum": 100
+                    },
+                    "closedPositionThreshold": {
+                      "type": "integer",
+                      "title": "Treat as fully closed at or below (%)",
+                      "description": "If a calibrated Tuya blind physically reaches its fully closed end stop while reporting above 0, set that reported HomeKit-facing percentage here. Values at or below it are exposed to HomeKit as 0. Leave at 0 for exact reporting.",
+                      "default": 0,
+                      "minimum": 0,
+                      "maximum": 50
                     }
                   }
                 }

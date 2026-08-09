@@ -219,6 +219,22 @@ class TuyaPlatform {
             this.log.warn('[Tuya QR] Ignoring invalid windowCovering.travelSeconds override for id "%s". Use a number from 5 to 180.', id);
           }
         }
+        if (item.windowCovering.openPositionThreshold !== undefined) {
+          const openPositionThreshold = Number(item.windowCovering.openPositionThreshold);
+          if (Number.isFinite(openPositionThreshold)) {
+            normalizedWindowCovering.openPositionThreshold = Math.max(50, Math.min(100, Math.round(openPositionThreshold)));
+          } else {
+            this.log.warn('[Tuya QR] Ignoring invalid windowCovering.openPositionThreshold override for id "%s". Use a number from 50 to 100.', id);
+          }
+        }
+        if (item.windowCovering.closedPositionThreshold !== undefined) {
+          const closedPositionThreshold = Number(item.windowCovering.closedPositionThreshold);
+          if (Number.isFinite(closedPositionThreshold)) {
+            normalizedWindowCovering.closedPositionThreshold = Math.max(0, Math.min(50, Math.round(closedPositionThreshold)));
+          } else {
+            this.log.warn('[Tuya QR] Ignoring invalid windowCovering.closedPositionThreshold override for id "%s". Use a number from 0 to 50.', id);
+          }
+        }
         if (item.windowCovering.channels && typeof item.windowCovering.channels === 'object' && !Array.isArray(item.windowCovering.channels)) {
           const normalizedChannels = {};
           for (const [rawChannel, rawChannelConfig] of Object.entries(item.windowCovering.channels)) {
@@ -254,6 +270,22 @@ class TuyaPlatform {
                 channelConfig.travelSeconds = Math.max(5, Math.min(180, Math.round(travelSeconds)));
               } else {
                 this.log.warn('[Tuya QR] Ignoring invalid windowCovering.channels.%s.travelSeconds override for id "%s". Use a number from 5 to 180.', channel, id);
+              }
+            }
+            if (rawChannelConfig.openPositionThreshold !== undefined) {
+              const openPositionThreshold = Number(rawChannelConfig.openPositionThreshold);
+              if (Number.isFinite(openPositionThreshold)) {
+                channelConfig.openPositionThreshold = Math.max(50, Math.min(100, Math.round(openPositionThreshold)));
+              } else {
+                this.log.warn('[Tuya QR] Ignoring invalid windowCovering.channels.%s.openPositionThreshold override for id "%s". Use a number from 50 to 100.', channel, id);
+              }
+            }
+            if (rawChannelConfig.closedPositionThreshold !== undefined) {
+              const closedPositionThreshold = Number(rawChannelConfig.closedPositionThreshold);
+              if (Number.isFinite(closedPositionThreshold)) {
+                channelConfig.closedPositionThreshold = Math.max(0, Math.min(50, Math.round(closedPositionThreshold)));
+              } else {
+                this.log.warn('[Tuya QR] Ignoring invalid windowCovering.channels.%s.closedPositionThreshold override for id "%s". Use a number from 0 to 50.', channel, id);
               }
             }
             if (Object.keys(channelConfig).length > 0) {

@@ -1,3 +1,12 @@
+## 1.0.45
+
+- Reworked blind/window-covering tile behavior into a direction-aware state machine. From fully closed, tap opens; tap while opening stops; the next tap resumes opening. From fully open, the same behavior is mirrored for closing.
+- When stopped at a partial position, a single tap resumes the direction that was moving before the stop; a very quick second tap reverses that direction (opening → closing or closing → opening).
+- Added `windowCovering.openPositionThreshold` and `windowCovering.closedPositionThreshold`, including per-channel variants. This allows a calibrated motor that is physically fully open at a reported 94%, for example, to be exposed to HomeKit as 100% open.
+- Endpoint normalization is applied after optional position inversion and is used by current-position, target-position, startup reconciliation, and movement-state logic.
+- Improved stop/reverse position estimation for motors without a live `percent_state` DP by using the active movement estimate during repeated tile taps.
+- Updated the Blind / Window Covering custom UI with endpoint-threshold controls and clarified that the legacy `doubleClickToClose` flag now enables partial-stop double-tap direction reversal.
+
 ## 1.0.44
 
 - Fixed Adaptive Lighting persistence when the Homebridge modal's bottom **SAVE** button is pressed immediately after toggling the option. The bottom SAVE remains locked until the direct disk write and Homebridge parent-buffer verification finish.

@@ -39,7 +39,7 @@ For motors that do not report live `percent_state` while moving, use `windowCove
 
 # Tuya without developer account for Homebridge
 
-Current release: **1.0.6**
+Current release: **1.0.45**
 
 
 A Homebridge platform plugin for Tuya and Smart Life devices that uses **Home Assistant-style Tuya QR Cloud Authentication**.
@@ -590,9 +590,11 @@ The separate **Stop Blind** tile has been removed. Blind/window-covering accesso
 - If the blind is fully closed, tapping opens it.
 - If the blind is fully open, tapping closes it.
 - If the blind is moving, tapping an endpoint command sends Tuya `stop` / `STOP` and immediately sets HomeKit `TargetPosition` to the current position so Apple Home stops showing the endless Opening/Closing spinner.
-- If the blind is partially open and stopped, a normal tap continues opening. A very quick second tap attempts to close instead; this is best-effort because Apple Home does not always emit a second identical tap event to Homebridge.
+- If the blind is stopped at a partial position, a normal tap resumes the same direction it was moving before the stop. A very quick second tap reverses that direction: opening → closing or closing → opening. This is best-effort because Apple Home sends TargetPosition writes rather than a dedicated double-tap event.
 
 For Tuya-app-triggered open/close commands, the default external state mapping is now `normal`, meaning Tuya app Open = HomeKit Open. Use `reversed` only if Tuya-app Open still appears as Closing/Closed in Apple Home.
+
+For calibration cases where the motor is physically at its end stop before Tuya reaches an exact percentage, use endpoint thresholds. For example, if the blind is physically fully open when Tuya reports 94%, set `openPositionThreshold` to `94`; HomeKit will expose 94–100 as 100% open. `closedPositionThreshold` does the equivalent at the closed end. These thresholds affect HomeKit-facing position only; full-open/full-close commands are still sent as 100/0.
 
 Recommended configuration for the reported calibrated blind case:
 
@@ -606,6 +608,8 @@ Recommended configuration for the reported calibrated blind case:
     "externalControlStateMode": "normal",
     "tapToStop": true,
     "doubleClickToClose": true,
+    "openPositionThreshold": 94,
+    "closedPositionThreshold": 0,
     "settleSeconds": 35
   }
 }

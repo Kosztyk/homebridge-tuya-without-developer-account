@@ -62,6 +62,18 @@ class BlindsAccessory extends BaseAccessory_1.default {
             }
             return 35;
         };
+        const firstOptionalNumber = (...values) => {
+            for (const value of values) {
+                if (value === undefined || value === null || value === '') {
+                    continue;
+                }
+                const number = Number(value);
+                if (Number.isFinite(number)) {
+                    return number;
+                }
+            }
+            return undefined;
+        };
         return {
             invertPosition: firstBoolean(channelConfig?.invertPosition, windowCovering?.invertPosition, deviceConfig?.invertPosition),
             reverseControl: firstBoolean(channelConfig?.reverseControl, windowCovering?.reverseControl, deviceConfig?.reverseControl, deviceConfig?.reverse),
@@ -72,6 +84,8 @@ class BlindsAccessory extends BaseAccessory_1.default {
             doubleClickToClose: firstBooleanDefault(true, channelConfig?.doubleClickToClose, windowCovering?.doubleClickToClose, deviceConfig?.doubleClickToClose),
             travelSeconds: (0, util_1.limit)(firstNumber(channelConfig?.travelSeconds, windowCovering?.travelSeconds, deviceConfig?.travelSeconds, channelConfig?.settleSeconds, windowCovering?.settleSeconds, deviceConfig?.settleSeconds), 5, 180),
             estimatePositionOnStop: firstBooleanDefault(true, channelConfig?.estimatePositionOnStop, windowCovering?.estimatePositionOnStop, deviceConfig?.estimatePositionOnStop),
+            openPositionThreshold: (0, util_1.limit)(firstOptionalNumber(channelConfig?.openPositionThreshold, windowCovering?.openPositionThreshold, deviceConfig?.openPositionThreshold) ?? 100, 50, 100),
+            closedPositionThreshold: (0, util_1.limit)(firstOptionalNumber(channelConfig?.closedPositionThreshold, windowCovering?.closedPositionThreshold, deviceConfig?.closedPositionThreshold) ?? 0, 0, 50),
         };
     }
     toLimitedPosition(value, fallback = 50) {
@@ -81,9 +95,23 @@ class BlindsAccessory extends BaseAccessory_1.default {
         }
         return (0, util_1.limit)(number, 0, 100);
     }
+    normalizeHomeKitEndpointPosition(value, channelName = 'control') {
+        const position = this.toLimitedPosition(value);
+        const options = this.getWindowCoveringOptions(channelName);
+        const openThreshold = this.toLimitedPosition(options.openPositionThreshold, 100);
+        const closedThreshold = this.toLimitedPosition(options.closedPositionThreshold, 0);
+        if (position >= openThreshold) {
+            return 100;
+        }
+        if (position <= closedThreshold) {
+            return 0;
+        }
+        return position;
+    }
     rawPositionToHomeKit(value, channelName = 'control') {
         const position = this.toLimitedPosition(value);
-        return this.getWindowCoveringOptions(channelName).invertPosition ? 100 - position : position;
+        const converted = this.getWindowCoveringOptions(channelName).invertPosition ? 100 - position : position;
+        return this.normalizeHomeKitEndpointPosition(converted, channelName);
     }
     homeKitPositionToRaw(value, channelName = 'control') {
         const position = this.toLimitedPosition(value);
@@ -119,10 +147,15 @@ class BlindsAccessory extends BaseAccessory_1.default {
         if (controlSchema) {
             return this.controlValueToPosition(this.getStatus(controlSchema.code)?.value);
         }
-        return this.targetPosition ?? 50;
+        return this.normalizeHomeKitEndpointPosition(this.targetPosition ?? 50);
     }
     setExternalMovementTarget(targetPosition, options = {}) {
-        this.externalMovementTarget = this.toLimitedPosition(targetPosition);
+        const currentPosition = this.getCurrentHomeKitPosition();
+        this.externalMovementTarget = this.normalizeHomeKitEndpointPosition(targetPosition);
+        const direction = this.getDirectionBetween(currentPosition, this.externalMovementTarget);
+        if (direction) {
+            this.lastMovementDirection = direction;
+        }
         this.externalMovementForceFinalState = !!options.forceFinalState;
         this.targetPosition = this.externalMovementTarget;
         const service = this.getService();
@@ -219,16 +252,93 @@ class BlindsAccessory extends BaseAccessory_1.default {
         }
         return true;
     }
+    getDirectionBetween(startPosition, targetPosition) {
+        const start = this.toLimitedPosition(startPosition);
+        const target = this.toLimitedPosition(targetPosition);
+        if (target > start + 1) {
+            return 1;
+        }
+        if (target < start - 1) {
+            return -1;
+        }
+        return 0;
+    }
     markMovementStart(startPosition, targetPosition) {
         this.stoppedHoldUntil = 0;
+        const start = this.toLimitedPosition(startPosition);
+        const target = this.toLimitedPosition(targetPosition);
         this.movementStart = {
-            startPosition: this.toLimitedPosition(startPosition),
-            targetPosition: this.toLimitedPosition(targetPosition),
+            startPosition: start,
+            targetPosition: target,
             startedAt: Date.now(),
         };
+        const direction = this.getDirectionBetween(start, target);
+        if (direction) {
+            this.lastMovementDirection = direction;
+        }
     }
     clearMovementStart() {
         this.movementStart = undefined;
+    }
+    getMovementDirectionBeforeStop(currentPosition) {
+        if (this.movementStart) {
+            const direction = this.getDirectionBetween(this.movementStart.startPosition, this.movementStart.targetPosition);
+            if (direction) {
+                return direction;
+            }
+        }
+        if (this.externalMovementTarget !== undefined) {
+            const direction = this.getDirectionBetween(currentPosition, this.externalMovementTarget);
+            if (direction) {
+                return direction;
+            }
+        }
+        const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
+        const controlStatus = controlSchema ? this.getStatus(controlSchema.code) : undefined;
+        if (controlSchema && this.isControlMoving(controlStatus?.value)) {
+            const commandTarget = this.controlValueToPosition(controlStatus?.value);
+            const direction = this.getDirectionBetween(currentPosition, commandTarget);
+            if (direction) {
+                return direction;
+            }
+        }
+        return this.lastMovementDirection === 1 || this.lastMovementDirection === -1
+            ? this.lastMovementDirection
+            : 0;
+    }
+    getResumeDirection(currentPosition, requestedTarget) {
+        if (this.lastStoppedDirection === 1 || this.lastStoppedDirection === -1) {
+            return this.lastStoppedDirection;
+        }
+        const requestedDirection = this.getDirectionBetween(currentPosition, requestedTarget);
+        if (requestedDirection) {
+            return requestedDirection;
+        }
+        const current = this.normalizeHomeKitEndpointPosition(currentPosition);
+        if (current <= 0) {
+            return 1;
+        }
+        if (current >= 100) {
+            return -1;
+        }
+        return 1;
+    }
+    clearPartialResumeTapWindow() {
+        this.partialResumeTapUntil = 0;
+        this.partialResumeDirection = 0;
+    }
+    armPartialResumeTapWindow(direction, now = Date.now()) {
+        this.partialResumeDirection = direction === -1 ? -1 : 1;
+        this.partialResumeTapUntil = now + 650;
+    }
+    getDoubleTapReverseDirection(now = Date.now()) {
+        if (Number(this.partialResumeTapUntil || 0) <= now) {
+            return 0;
+        }
+        if (this.partialResumeDirection !== 1 && this.partialResumeDirection !== -1) {
+            return 0;
+        }
+        return -this.partialResumeDirection;
     }
     isPartialHomeKitPosition(position) {
         const value = this.toLimitedPosition(position);
@@ -265,9 +375,14 @@ class BlindsAccessory extends BaseAccessory_1.default {
             this.getSchema(...SCHEMA_CODE.POSITION);
         const controlSchema = this.getSchema(...SCHEMA_CODE.CONTROL);
         const options = this.getWindowCoveringOptions();
-        const currentPosition = this.toLimitedPosition(position ?? (options.estimatePositionOnStop === false ? this.getCurrentHomeKitPosition() : this.getEstimatedHomeKitPosition()));
+        const currentPosition = this.normalizeHomeKitEndpointPosition(position ?? (options.estimatePositionOnStop === false ? this.getCurrentHomeKitPosition() : this.getEstimatedHomeKitPosition()));
+        const stoppedDirection = this.getMovementDirectionBeforeStop(currentPosition);
+        if (stoppedDirection) {
+            this.lastStoppedDirection = stoppedDirection;
+        }
         this.targetPosition = currentPosition;
         this.clearMovementStart();
+        this.clearPartialResumeTapWindow();
         this.markStoppedHold();
         const rawCurrentPosition = this.homeKitPositionToRaw(currentPosition);
         if (currentSchema) {
@@ -291,8 +406,8 @@ class BlindsAccessory extends BaseAccessory_1.default {
     async stopAtCurrentPosition(controlSchema, targetSchema, reason = 'tap') {
         this.clearExternalMovementTimer();
         this.clearHomeKitMovementTimer();
-        this.clearExternalMovementTarget();
         const currentPosition = this.setLocalStoppedAtCurrentPosition();
+        this.clearExternalMovementTarget();
         const commands = [];
         if (controlSchema) {
             commands.push({ code: controlSchema.code, value: this.getStopCommandForControlSchema(controlSchema) });
@@ -331,7 +446,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
         service.getCharacteristic(this.Characteristic.CurrentPosition)
             .onGet(() => {
             if (this.isStoppedHoldActive() && this.targetPosition !== undefined) {
-                return this.targetPosition;
+                return this.normalizeHomeKitEndpointPosition(this.targetPosition);
             }
             // Prefer current position schema if available
             if (currentSchema) {
@@ -437,7 +552,7 @@ class BlindsAccessory extends BaseAccessory_1.default {
                 return this.externalMovementTarget;
             }
             if (this.targetPosition !== undefined && this.getPositionStateValue() === this.Characteristic.PositionState.STOPPED) {
-                return this.targetPosition;
+                return this.normalizeHomeKitEndpointPosition(this.targetPosition);
             }
             // If target position schema exists, use it
             if (targetSchema) {
@@ -453,39 +568,48 @@ class BlindsAccessory extends BaseAccessory_1.default {
         })
             .onSet(async (value) => {
             let targetPos = this.toLimitedPosition(value);
-            const currentPosition = this.getCurrentHomeKitPosition();
+            const liveCurrentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_POSITION);
+            const currentPosition = this.movementStart && !liveCurrentSchema
+                ? this.getEstimatedHomeKitPosition()
+                : this.getCurrentHomeKitPosition();
             const options = this.getWindowCoveringOptions();
             const now = Date.now();
             const endpointTap = targetPos <= 5 || targetPos >= 95;
             const isPartial = this.isPartialHomeKitPosition(currentPosition);
             const wasStopped = this.getPositionStateValue() === this.Characteristic.PositionState.STOPPED;
+            let reversedByDoubleTap = false;
             if (this.shouldStopOnTargetTap(targetPos)) {
-                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil && now < this.partialOpenDoubleClickUntil && endpointTap) {
-                    targetPos = 0;
-                    this.partialOpenDoubleClickUntil = 0;
+                const reverseDirection = options.doubleClickToClose !== false && endpointTap
+                    ? this.getDoubleTapReverseDirection(now)
+                    : 0;
+                if (reverseDirection) {
+                    // A second fast tap after resuming from a partial stop reverses
+                    // the previous movement direction instead of stopping again.
+                    targetPos = reverseDirection > 0 ? 100 : 0;
+                    this.clearPartialResumeTapWindow();
+                    reversedByDoubleTap = true;
                 }
                 else {
+                    // Any ordinary tap while moving is a hard stop.
                     await this.stopAtCurrentPosition(controlSchema, targetSchema, 'tap-to-stop');
                     return;
                 }
             }
-            if (wasStopped && isPartial && endpointTap) {
-                if (options.doubleClickToClose !== false && this.partialOpenDoubleClickUntil && now < this.partialOpenDoubleClickUntil) {
-                    targetPos = 0;
-                    this.partialOpenDoubleClickUntil = 0;
+            if (!reversedByDoubleTap && wasStopped && isPartial && endpointTap) {
+                // From a partial STOPPED position, a single tap resumes the same
+                // direction that was moving before the stop. A second fast tap
+                // reverses that direction (opening -> closing, closing -> opening).
+                const resumeDirection = this.getResumeDirection(currentPosition, targetPos);
+                targetPos = resumeDirection > 0 ? 100 : 0;
+                if (options.doubleClickToClose !== false) {
+                    this.armPartialResumeTapWindow(resumeDirection, now);
                 }
                 else {
-                    // For any partial position (1-99%), a normal tap resumes opening.
-                    // A second very fast tap closes instead, when HomeKit sends it.
-                    targetPos = 100;
-                    this.partialOpenDoubleClickUntil = options.doubleClickToClose === false ? 0 : now + 650;
+                    this.clearPartialResumeTapWindow();
                 }
             }
-            else if (isPartial && targetPos >= 95 && options.doubleClickToClose !== false) {
-                this.partialOpenDoubleClickUntil = now + 650;
-            }
-            else {
-                this.partialOpenDoubleClickUntil = 0;
+            else if (!reversedByDoubleTap) {
+                this.clearPartialResumeTapWindow();
             }
             this.stoppedHoldUntil = 0;
             this.targetPosition = targetPos;
