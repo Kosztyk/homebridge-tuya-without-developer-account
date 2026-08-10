@@ -290,5 +290,5 @@ v1.0.36: The custom Pet Feeder override UI was removed to avoid forcing unrelate
 
 ### Dual-light ceiling fan quirk (PID `atfenlerda169ygw`)
 
-Live Tuya Device Sharing MQTT traces confirm this fan has two physical light channels. `switch_led` controls the white lamp, `colour_data` carries RGB HSV data, and proprietary raw DP `103` reports the RGB power state (`on` / `off`). The plugin maps raw DP 103 to the writable `colour_switch` function and exposes separate White Light and RGB Light HomeKit services. RGB brightness is intentionally omitted because this firmware does not offer adjustable RGB brightness.
+Live Tuya Device Sharing MQTT traces confirm this fan has two physical light channels. `switch_led` controls the white lamp, `colour_data` carries static RGB HSV data, and proprietary raw DP `103` reports the RGB power state (`on` / `off`). `colour_switch` is **not** the RGB power switch on this firmware: enabling it starts the rainbow/effect mode. The plugin therefore exposes separate White Light and RGB Light HomeKit services, turns static RGB on by re-sending the last `colour_data`, turns it off with raw DP `103=off`, and maps incoming DP103 reports to an internal RGB power state. RGB brightness is intentionally omitted because this firmware does not offer adjustable RGB brightness.
 

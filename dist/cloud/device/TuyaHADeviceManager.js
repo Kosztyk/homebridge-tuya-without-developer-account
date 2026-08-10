@@ -300,20 +300,19 @@ class TuyaHADeviceManager extends events_1.default {
     }
     mapRawDPStatus(device, dpId, rawValue) {
         // Some Tuya Device Sharing MQTT reports contain a proprietary DP as a
-        // numeric key only, without the usual `code` / `value` pair. The
-        // atfenlerda169ygw ceiling-fan firmware uses raw DP 103 as the power
-        // state for its separate RGB/decorative light, while the public
-        // specification exposes that writable function as `colour_switch`.
-        // Preserve this as a narrow product quirk instead of guessing what DP
-        // 103 means on unrelated Tuya products.
+        // numeric key only, without the usual `code` / `value` pair. Live
+        // traces for ceiling-fan PID atfenlerda169ygw prove raw DP103 is the
+        // static RGB light's real on/off state. Do NOT map it to colour_switch:
+        // on this firmware colour_switch=true starts the rainbow/effect mode.
         if (device?.product_id === 'atfenlerda169ygw' && String(dpId) === '103') {
-            const hasColourSwitch = Array.isArray(device.schema)
-                && device.schema.some(schema => schema?.code === 'colour_switch');
-            if (!hasColourSwitch) {
-                return undefined;
+            let value;
+            if (typeof rawValue === 'boolean') {
+                value = rawValue;
             }
-            let value = rawValue;
-            if (typeof rawValue === 'string') {
+            else if (typeof rawValue === 'number' && (rawValue === 0 || rawValue === 1)) {
+                value = rawValue === 1;
+            }
+            else if (typeof rawValue === 'string') {
                 const normalized = rawValue.trim().toLowerCase();
                 if (['on', 'true', '1'].includes(normalized)) {
                     value = true;
@@ -322,7 +321,9 @@ class TuyaHADeviceManager extends events_1.default {
                     value = false;
                 }
             }
-            return { code: 'colour_switch', value };
+            if (value !== undefined) {
+                return { code: 'rgb_light_power', value };
+            }
         }
         return undefined;
     }

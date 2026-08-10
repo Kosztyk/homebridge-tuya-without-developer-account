@@ -1,3 +1,12 @@
+# 1.0.51
+
+- Corrected RGB power handling for dual-light ceiling fan PID `atfenlerda169ygw` using the user's live Homebridge MQTT behavior. `colour_switch` is no longer used as RGB power because `true` starts the fan's rainbow/effect mode.
+- HomeKit RGB **On** now re-sends the last valid `colour_data` HSV payload, matching the Smart Life behavior where selecting a static color activates the RGB LEDs. The last valid HSV value is persisted in the cached HomeKit accessory context and survives Homebridge restarts.
+- HomeKit RGB **Off** now sends the verified proprietary raw DP `103` value `"off"`; incoming raw DP103 reports are normalized to an internal `rgb_light_power` status instead of being incorrectly mapped to `colour_switch`.
+- Any live `colour_data` update marks the RGB HomeKit service ON, so choosing a color no longer leaves the HomeKit switch visually OFF.
+- Preserves the white-light suppression workaround: if changing RGB wakes `switch_led` while white was intentionally off, the plugin sends `switch_led=false` again after the RGB command.
+- RGB brightness remains hidden because this firmware does not expose adjustable RGB brightness.
+
 # 1.0.50
 
 - Reissued the corrected ceiling-fan dual-light/RGB build from 1.0.49 as a new npm-publishable version.

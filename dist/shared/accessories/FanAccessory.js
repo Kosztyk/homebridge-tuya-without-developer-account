@@ -19,7 +19,7 @@ const SCHEMA_CODE = {
     FAN_LOCK: ['child_lock'],
     FAN_SWING: ['switch_horizontal', 'switch_vertical'],
     LIGHT_ON: ['light', 'switch_led'],
-    RGB_LIGHT_ON: ['colour_switch'],
+    RGB_EFFECT: ['colour_switch'],
     LIGHT_MODE: ['work_mode'],
     LIGHT_BRIGHT: ['bright_value', 'bright_value_v2'],
     LIGHT_TEMP: ['temp_value', 'temp_value_v2'],
@@ -84,13 +84,13 @@ class FanAccessory extends BaseAccessory_1.default {
     }
     hasSeparateRgbLight() {
         // Verified from live Device Sharing MQTT for PID atfenlerda169ygw:
-        // DP20/switch_led controls the white lamp, DP24/colour_data carries
-        // the RGB HSV colour, and proprietary raw DP103 is the RGB power state
-        // exposed by the cloud specification as colour_switch. Keep the quirk
-        // product-scoped until another fan confirms the same wiring.
+        // DP20/switch_led controls the white lamp and DP24/colour_data controls
+        // the static RGB colour. Selecting/sending a colour turns the RGB LEDs
+        // on. Proprietary raw DP103 reports RGB on/off. The public
+        // colour_switch function is NOT RGB power on this firmware: setting it
+        // true starts the rainbow/effect mode. Keep this behavior product-scoped.
         return this.device?.product_id === 'atfenlerda169ygw'
             && !!this.getSchema(...SCHEMA_CODE.LIGHT_ON)
-            && !!this.getSchema(...SCHEMA_CODE.RGB_LIGHT_ON)
             && !!this.getSchema(...SCHEMA_CODE.LIGHT_COLOR);
     }
     removeCharacteristicIfPresent(service, characteristicType) {
@@ -105,26 +105,189 @@ class FanAccessory extends BaseAccessory_1.default {
     }
     configureSeparateWhiteAndRgbLights() {
         const whiteOn = this.getSchema(...SCHEMA_CODE.LIGHT_ON);
-        const rgbOn = this.getSchema(...SCHEMA_CODE.RGB_LIGHT_ON);
         const color = this.getSchema(...SCHEMA_CODE.LIGHT_COLOR);
         const whiteService = this.lightService();
         const rgbService = this.rgbLightService();
-        // v1.0.48/early-v1.0.49 used the un-subtyped light as one combined
-        // RGBCW service. Reuse that service as the white lamp so its HomeKit
-        // service identity stays stable, but remove RGB-only characteristics.
+        // v1.0.48 used the un-subtyped light as one combined RGBCW service.
+        // Reuse that stable service as the white lamp and strip RGB-only
+        // characteristics from it.
         this.removeCharacteristicIfPresent(whiteService, this.Characteristic.Hue);
         this.removeCharacteristicIfPresent(whiteService, this.Characteristic.Saturation);
         (0, Light_1.configureLight)(this, whiteService, whiteOn, this.getSchema(...SCHEMA_CODE.LIGHT_BRIGHT), this.getSchema(...SCHEMA_CODE.LIGHT_TEMP), undefined, undefined);
-        // The decorative RGB channel is independent of the white lamp. The
-        // owner confirmed RGB brightness is not adjustable, so expose only
-        // On, Hue and Saturation and preserve colour_data.v unchanged.
-        (0, Light_1.configureLight)(this, rgbService, rgbOn, undefined, undefined, color, undefined, {
+        // Static RGB power is unusual on this product. `colour_switch=true`
+        // starts a rainbow effect, so it must never back HomeKit's normal On
+        // characteristic. Treat RGB as an HSV-only light: selecting/sending
+        // colour_data turns it on, while raw DP103 is used for the explicit
+        // off command and live on/off feedback. No RGB brightness is exposed.
+        const syntheticRgbOn = { code: 'rgb_light_power' };
+        (0, Light_1.configureLight)(this, rgbService, syntheticRgbOn, undefined, undefined, color, undefined, {
+            skipOn: true,
             disableColorBrightness: true,
             disableAdaptiveLighting: true,
             preserveOffSchema: whiteOn,
             preserveOffDelayMs: 180,
         });
-        this.log.info('Detected dual-light fan firmware: exposing separate white and RGB HomeKit Lightbulb services.');
+        this.configureRgbPower(rgbService, color, whiteOn);
+        this.seedLastRgbColor(color);
+        this.log.info('Detected dual-light fan firmware: white light + static RGB light (DP103 power, colour_data HSV); colour_switch rainbow mode is not used as RGB power.');
+    }
+    parseRgbPowerValue(value) {
+        if (typeof value === 'boolean') {
+            return value;
+        }
+        if (typeof value === 'number') {
+            if (value === 1) {
+                return true;
+            }
+            if (value === 0) {
+                return false;
+            }
+        }
+        if (typeof value === 'string') {
+            const normalized = value.trim().toLowerCase();
+            if (['on', 'true', '1'].includes(normalized)) {
+                return true;
+            }
+            if (['off', 'false', '0'].includes(normalized)) {
+                return false;
+            }
+        }
+        return undefined;
+    }
+    getRgbPowerState() {
+        const synthetic = this.getStatus('rgb_light_power');
+        const mapped = this.parseRgbPowerValue(synthetic?.value);
+        if (mapped !== undefined) {
+            return mapped;
+        }
+        const raw = this.getStatus('103');
+        const rawMapped = this.parseRgbPowerValue(raw?.value);
+        if (rawMapped !== undefined) {
+            return rawMapped;
+        }
+        if (typeof this.accessory.context?.rgbLightPower === 'boolean') {
+            return this.accessory.context.rgbLightPower;
+        }
+        return false;
+    }
+    setRgbPowerState(value) {
+        const normalized = !!value;
+        this.accessory.context.rgbLightPower = normalized;
+        if (this.device) {
+            const current = this.device.status.find(status => status.code === 'rgb_light_power');
+            if (current) {
+                current.value = normalized;
+            }
+            else {
+                this.device.status.push({ code: 'rgb_light_power', value: normalized });
+            }
+        }
+    }
+    normalizeRgbColor(value) {
+        if (value === undefined || value === null || value === '' || value === '{}') {
+            return undefined;
+        }
+        try {
+            const raw = typeof value === 'string' ? JSON.parse(value) : value;
+            if (!raw || typeof raw !== 'object') {
+                return undefined;
+            }
+            const h = Number(raw.h);
+            const sat = Number(raw.s);
+            const val = Number(raw.v);
+            if (![h, sat, val].every(Number.isFinite)) {
+                return undefined;
+            }
+            return JSON.stringify({ h, s: sat, v: val });
+        }
+        catch (_error) {
+            return undefined;
+        }
+    }
+    seedLastRgbColor(colorSchema) {
+        if (!colorSchema) {
+            return;
+        }
+        const live = this.normalizeRgbColor(this.getStatus(colorSchema.code)?.value);
+        if (live) {
+            this.accessory.context.rgbLastColourData = live;
+        }
+    }
+    getLastRgbColor(colorSchema) {
+        const live = colorSchema ? this.normalizeRgbColor(this.getStatus(colorSchema.code)?.value) : undefined;
+        if (live) {
+            this.accessory.context.rgbLastColourData = live;
+            return live;
+        }
+        const saved = this.normalizeRgbColor(this.accessory.context?.rgbLastColourData);
+        if (saved) {
+            return saved;
+        }
+        // Fan1's verified payload uses v=390 and this firmware does not expose
+        // RGB brightness. Use a visible red fallback only until a real colour
+        // has been observed, then persist the actual HSV payload in context.
+        return JSON.stringify({ h: 0, s: 1000, v: 390 });
+    }
+    async sendRgbColorPreservingWhite(colorSchema, whiteOnSchema, colorValue) {
+        const preserveWhiteOff = !!whiteOnSchema && this.getStatus(whiteOnSchema.code)?.value === false;
+        await this.sendCommands([{ code: colorSchema.code, value: colorValue }], false);
+        if (preserveWhiteOff) {
+            await new Promise(resolve => setTimeout(resolve, 180));
+            await this.sendCommands([{ code: whiteOnSchema.code, value: false }], false);
+        }
+    }
+    configureRgbPower(service, colorSchema, whiteOnSchema) {
+        service.getCharacteristic(this.Characteristic.On)
+            .onGet(() => {
+            this.checkOnlineStatus();
+            return this.getRgbPowerState();
+        })
+            .onSet(async (value) => {
+            const turnOn = !!value;
+            if (turnOn) {
+                // Do not write colour_switch=true: this firmware interprets
+                // that as rainbow/effect mode. Re-send the last static HSV
+                // colour instead, which the live Smart Life trace proves turns
+                // the RGB LEDs on.
+                const lastColor = this.getLastRgbColor(colorSchema);
+                await this.sendRgbColorPreservingWhite(colorSchema, whiteOnSchema, lastColor);
+                this.setRgbPowerState(true);
+            }
+            else {
+                // Live Device Sharing reports the real RGB power as proprietary
+                // DP103 with values "on"/"off". The QR command endpoint accepts
+                // code/value commands, so use numeric code 103 narrowly for this
+                // verified product rather than abusing colour_switch.
+                await this.sendCommands([{ code: '103', value: 'off' }], false);
+                this.setRgbPowerState(false);
+            }
+        });
+    }
+    async onDeviceStatusUpdate(status) {
+        if (this.hasSeparateRgbLight() && Array.isArray(status)) {
+            const colorCodes = new Set(SCHEMA_CODE.LIGHT_COLOR.map(code => code.toLowerCase()));
+            for (const item of status) {
+                const code = String(item?.code ?? '').toLowerCase();
+                if (colorCodes.has(code)) {
+                    const normalizedColor = this.normalizeRgbColor(item.value);
+                    if (normalizedColor) {
+                        this.accessory.context.rgbLastColourData = normalizedColor;
+                        // On this product, a static colour report means the RGB
+                        // LEDs have been activated, even if no separate boolean
+                        // power code was reported alongside it.
+                        this.setRgbPowerState(true);
+                    }
+                    continue;
+                }
+                if (code === 'rgb_light_power' || code === '103') {
+                    const power = this.parseRgbPowerValue(item.value);
+                    if (power !== undefined) {
+                        this.setRgbPowerState(power);
+                    }
+                }
+            }
+        }
+        await super.onDeviceStatusUpdate(status);
     }
     fanServiceType() {
         if (this.getSchema(...SCHEMA_CODE.FAN_LOCK)

@@ -271,19 +271,27 @@ function configureLight(accessory, service, onSchema, brightSchema, tempSchema, 
     accessory.log.info('Light type:', lightType);
     switch (lightType) {
         case LightType.Normal:
-            (0, On_1.configureOn)(accessory, service, onSchema);
+            if (options.skipOn !== true) {
+                (0, On_1.configureOn)(accessory, service, onSchema);
+            }
             break;
         case LightType.C:
-            (0, On_1.configureOn)(accessory, service, onSchema);
+            if (options.skipOn !== true) {
+                (0, On_1.configureOn)(accessory, service, onSchema);
+            }
             configureBrightness(accessory, service, lightType, brightSchema, colorSchema, modeSchema);
             break;
         case LightType.CW:
-            (0, On_1.configureOn)(accessory, service, onSchema);
+            if (options.skipOn !== true) {
+                (0, On_1.configureOn)(accessory, service, onSchema);
+            }
             configureBrightness(accessory, service, lightType, brightSchema, colorSchema, modeSchema);
             configureColourTemperature(accessory, service, lightType, tempSchema, modeSchema);
             break;
         case LightType.RGB:
-            (0, On_1.configureOn)(accessory, service, onSchema);
+            if (options.skipOn !== true) {
+                (0, On_1.configureOn)(accessory, service, onSchema);
+            }
             if (options.disableColorBrightness !== true) {
                 configureBrightness(accessory, service, lightType, brightSchema, colorSchema, modeSchema);
             }
@@ -292,7 +300,9 @@ function configureLight(accessory, service, onSchema, brightSchema, tempSchema, 
             break;
         case LightType.RGBC:
         case LightType.RGBCW:
-            (0, On_1.configureOn)(accessory, service, onSchema);
+            if (options.skipOn !== true) {
+                (0, On_1.configureOn)(accessory, service, onSchema);
+            }
             configureBrightness(accessory, service, lightType, brightSchema, colorSchema, modeSchema);
             configureColourTemperature(accessory, service, lightType, tempSchema, modeSchema);
             configureHue(accessory, service, lightType, colorSchema, modeSchema, options);
