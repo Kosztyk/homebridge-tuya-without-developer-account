@@ -1,3 +1,12 @@
+# 1.0.52
+
+- Fixed RGB OFF for the verified dual-light ceiling fan (`product_id: atfenlerda169ygw`).
+- Tuya HA QR rejects raw numeric command `103="off"` with error `2008`, so DP103 is now treated as **status/report-only**.
+- HomeKit RGB **Off** now sends the writable schema command `colour_switch=false`. `colour_switch=true` is still never used for normal RGB ON because it starts the rainbow/effect mode.
+- If direct `colour_switch=false` is not confirmed by an incoming DP103 `off` report, the plugin performs one guarded Smart-Life-style fallback: `colour_switch=true`, then `colour_switch=false`.
+- Incoming DP103 values such as `mode_10` are now interpreted as RGB active (`rgb_light_power=true`) instead of being ignored; DP103 `off` remains authoritative for the OFF state.
+- Static RGB **On** remains driven by the last `colour_data` HSV value, so turning RGB on does not start the rainbow effect.
+
 # 1.0.51
 
 - Corrected RGB power handling for dual-light ceiling fan PID `atfenlerda169ygw` using the user's live Homebridge MQTT behavior. `colour_switch` is no longer used as RGB power because `true` starts the fan's rainbow/effect mode.

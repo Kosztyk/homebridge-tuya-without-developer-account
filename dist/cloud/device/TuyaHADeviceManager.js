@@ -302,8 +302,11 @@ class TuyaHADeviceManager extends events_1.default {
         // Some Tuya Device Sharing MQTT reports contain a proprietary DP as a
         // numeric key only, without the usual `code` / `value` pair. Live
         // traces for ceiling-fan PID atfenlerda169ygw prove raw DP103 is the
-        // static RGB light's real on/off state. Do NOT map it to colour_switch:
-        // on this firmware colour_switch=true starts the rainbow/effect mode.
+        // static RGB light's effective state. Values such as mode_10 mean an
+        // RGB effect is active, while `off` means the RGB LEDs are off. Do NOT
+        // map it to colour_switch: on this firmware colour_switch=true starts
+        // the rainbow/effect mode, while colour_switch=false is used as the
+        // schema-backed OFF command.
         if (device?.product_id === 'atfenlerda169ygw' && String(dpId) === '103') {
             let value;
             if (typeof rawValue === 'boolean') {
@@ -314,7 +317,7 @@ class TuyaHADeviceManager extends events_1.default {
             }
             else if (typeof rawValue === 'string') {
                 const normalized = rawValue.trim().toLowerCase();
-                if (['on', 'true', '1'].includes(normalized)) {
+                if (['on', 'true', '1'].includes(normalized) || /^mode_[0-9]+$/.test(normalized)) {
                     value = true;
                 }
                 else if (['off', 'false', '0'].includes(normalized)) {

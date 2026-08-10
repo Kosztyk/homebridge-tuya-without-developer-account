@@ -106,6 +106,7 @@ class FanAccessory extends BaseAccessory_1.default {
     configureSeparateWhiteAndRgbLights() {
         const whiteOn = this.getSchema(...SCHEMA_CODE.LIGHT_ON);
         const color = this.getSchema(...SCHEMA_CODE.LIGHT_COLOR);
+        const rgbEffect = this.getSchema(...SCHEMA_CODE.RGB_EFFECT);
         const whiteService = this.lightService();
         const rgbService = this.rgbLightService();
         // v1.0.48 used the un-subtyped light as one combined RGBCW service.
@@ -117,8 +118,10 @@ class FanAccessory extends BaseAccessory_1.default {
         // Static RGB power is unusual on this product. `colour_switch=true`
         // starts a rainbow effect, so it must never back HomeKit's normal On
         // characteristic. Treat RGB as an HSV-only light: selecting/sending
-        // colour_data turns it on, while raw DP103 is used for the explicit
-        // off command and live on/off feedback. No RGB brightness is exposed.
+        // colour_data turns it on. Incoming raw DP103 is status feedback only.
+        // For OFF, use the writable semantic `colour_switch=false` command that
+        // Tuya exposes in the device schema; the QR endpoint rejects raw
+        // numeric DP103 writes with error 2008. No RGB brightness is exposed.
         const syntheticRgbOn = { code: 'rgb_light_power' };
         (0, Light_1.configureLight)(this, rgbService, syntheticRgbOn, undefined, undefined, color, undefined, {
             skipOn: true,
@@ -127,9 +130,9 @@ class FanAccessory extends BaseAccessory_1.default {
             preserveOffSchema: whiteOn,
             preserveOffDelayMs: 180,
         });
-        this.configureRgbPower(rgbService, color, whiteOn);
+        this.configureRgbPower(rgbService, color, whiteOn, rgbEffect);
         this.seedLastRgbColor(color);
-        this.log.info('Detected dual-light fan firmware: white light + static RGB light (DP103 power, colour_data HSV); colour_switch rainbow mode is not used as RGB power.');
+        this.log.info('Detected dual-light fan firmware: white light + static RGB light (DP103 status, colour_data HSV); RGB OFF uses colour_switch=false while colour_switch=true remains effect/rainbow mode.');
     }
     parseRgbPowerValue(value) {
         if (typeof value === 'boolean') {
@@ -236,7 +239,7 @@ class FanAccessory extends BaseAccessory_1.default {
             await this.sendCommands([{ code: whiteOnSchema.code, value: false }], false);
         }
     }
-    configureRgbPower(service, colorSchema, whiteOnSchema) {
+    configureRgbPower(service, colorSchema, whiteOnSchema, rgbEffectSchema) {
         service.getCharacteristic(this.Characteristic.On)
             .onGet(() => {
             this.checkOnlineStatus();
@@ -252,15 +255,41 @@ class FanAccessory extends BaseAccessory_1.default {
                 const lastColor = this.getLastRgbColor(colorSchema);
                 await this.sendRgbColorPreservingWhite(colorSchema, whiteOnSchema, lastColor);
                 this.setRgbPowerState(true);
+                return;
             }
-            else {
-                // Live Device Sharing reports the real RGB power as proprietary
-                // DP103 with values "on"/"off". The QR command endpoint accepts
-                // code/value commands, so use numeric code 103 narrowly for this
-                // verified product rather than abusing colour_switch.
-                await this.sendCommands([{ code: '103', value: 'off' }], false);
-                this.setRgbPowerState(false);
+            // Raw numeric DP103 is report-only on the HA QR endpoint: writing
+            // {code:"103",value:"off"} is rejected with Tuya error 2008.
+            // The device specification does expose `colour_switch` as a
+            // writable boolean. On this firmware TRUE starts an RGB effect,
+            // while disabling the active RGB mode produces the observed raw
+            // DP103="off" report. Therefore OFF is deliberately asymmetric:
+            // static RGB ON is colour_data; RGB OFF is colour_switch=false.
+            if (!rgbEffectSchema) {
+                this.log.warn('Cannot turn RGB off: writable colour_switch schema is missing.');
+                return;
             }
+            await this.sendCommands([{ code: rgbEffectSchema.code, value: false }], false);
+            // Do not fake rgb_light_power=false here. DP103 is the authoritative
+            // report and should update HomeKit when the device confirms OFF.
+            //
+            // Some firmware revisions only honor the OFF transition after an
+            // effect mode has first been selected (matching the Smart Life UI).
+            // If the direct OFF does not produce DP103=off, reproduce that
+            // sequence once as a guarded fallback: effect ON -> effect OFF.
+            setTimeout(async () => {
+                if (!this.getRgbPowerState()) {
+                    return;
+                }
+                try {
+                    this.log.info('RGB OFF not yet confirmed by DP103; trying effect-toggle fallback.');
+                    await this.sendCommands([{ code: rgbEffectSchema.code, value: true }], false);
+                    await new Promise(resolve => setTimeout(resolve, 220));
+                    await this.sendCommands([{ code: rgbEffectSchema.code, value: false }], false);
+                }
+                catch (error) {
+                    this.log.warn(`RGB effect-toggle OFF fallback failed: ${error instanceof Error ? error.message : error}`);
+                }
+            }, 700);
         });
     }
     async onDeviceStatusUpdate(status) {
