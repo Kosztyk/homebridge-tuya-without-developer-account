@@ -132,7 +132,7 @@ class FanAccessory extends BaseAccessory_1.default {
         });
         this.configureRgbPower(rgbService, color, whiteOn, rgbEffect);
         this.seedLastRgbColor(color);
-        this.log.info('Detected dual-light fan firmware: white light + static RGB light (DP103 status, colour_data HSV); RGB OFF uses colour_switch=false while colour_switch=true remains effect/rainbow mode.');
+        this.log.info('Detected dual-light fan firmware: white light + static RGB light (DP103 status, colour_data HSV); RGB OFF uses one serialized colour_switch=true -> false sequence required by this firmware.');
     }
     parseRgbPowerValue(value) {
         if (typeof value === 'boolean') {
@@ -240,7 +240,8 @@ class FanAccessory extends BaseAccessory_1.default {
         }
     }
     configureRgbPower(service, colorSchema, whiteOnSchema, rgbEffectSchema) {
-        service.getCharacteristic(this.Characteristic.On)
+        const onCharacteristic = service.getCharacteristic(this.Characteristic.On);
+        onCharacteristic
             .onGet(() => {
             this.checkOnlineStatus();
             return this.getRgbPowerState();
@@ -248,48 +249,57 @@ class FanAccessory extends BaseAccessory_1.default {
             .onSet(async (value) => {
             const turnOn = !!value;
             if (turnOn) {
-                // Do not write colour_switch=true: this firmware interprets
-                // that as rainbow/effect mode. Re-send the last static HSV
-                // colour instead, which the live Smart Life trace proves turns
-                // the RGB LEDs on.
+                // Serialize a later ON behind any already-running OFF sequence
+                // so both operations cannot race each other.
+                if (this.rgbOffPromise) {
+                    try {
+                        await this.rgbOffPromise;
+                    }
+                    catch (_error) {
+                        // Continue with the explicit ON request even if the
+                        // preceding OFF operation failed.
+                    }
+                }
+                // Do not write colour_switch=true for normal RGB ON: this
+                // firmware interprets that as rainbow/effect mode. Re-send the
+                // last static HSV colour instead.
                 const lastColor = this.getLastRgbColor(colorSchema);
                 await this.sendRgbColorPreservingWhite(colorSchema, whiteOnSchema, lastColor);
                 this.setRgbPowerState(true);
+                onCharacteristic.updateValue(true);
                 return;
             }
-            // Raw numeric DP103 is report-only on the HA QR endpoint: writing
-            // {code:"103",value:"off"} is rejected with Tuya error 2008.
-            // The device specification does expose `colour_switch` as a
-            // writable boolean. On this firmware TRUE starts an RGB effect,
-            // while disabling the active RGB mode produces the observed raw
-            // DP103="off" report. Therefore OFF is deliberately asymmetric:
-            // static RGB ON is colour_data; RGB OFF is colour_switch=false.
             if (!rgbEffectSchema) {
                 this.log.warn('Cannot turn RGB off: writable colour_switch schema is missing.');
-                return;
+                throw new Error('RGB OFF is unavailable because colour_switch is missing.');
             }
-            await this.sendCommands([{ code: rgbEffectSchema.code, value: false }], false);
-            // Do not fake rgb_light_power=false here. DP103 is the authoritative
-            // report and should update HomeKit when the device confirms OFF.
-            //
-            // Some firmware revisions only honor the OFF transition after an
-            // effect mode has first been selected (matching the Smart Life UI).
-            // If the direct OFF does not produce DP103=off, reproduce that
-            // sequence once as a guarded fallback: effect ON -> effect OFF.
-            setTimeout(async () => {
-                if (!this.getRgbPowerState()) {
-                    return;
-                }
-                try {
-                    this.log.info('RGB OFF not yet confirmed by DP103; trying effect-toggle fallback.');
-                    await this.sendCommands([{ code: rgbEffectSchema.code, value: true }], false);
-                    await new Promise(resolve => setTimeout(resolve, 220));
-                    await this.sendCommands([{ code: rgbEffectSchema.code, value: false }], false);
-                }
-                catch (error) {
-                    this.log.warn(`RGB effect-toggle OFF fallback failed: ${error instanceof Error ? error.message : error}`);
-                }
-            }, 700);
+            // HomeKit can issue repeated OFF writes while characteristics are
+            // refreshed. Coalesce all of them into ONE hardware transaction so
+            // this firmware flashes its effect mode only once.
+            if (!this.rgbOffPromise) {
+                this.rgbOffPromise = (async () => {
+                    try {
+                        // Verified device behavior: the static RGB channel has
+                        // no direct OFF action in Smart Life. It turns off only
+                        // after entering an RGB effect and then disabling it:
+                        //   colour_switch=true  -> enter effect mode
+                        //   colour_switch=false -> exit effect mode / RGB off
+                        this.log.info('Turning static RGB off using one serialized effect-toggle sequence.');
+                        await this.sendCommands([{ code: rgbEffectSchema.code, value: true }], false);
+                        await new Promise(resolve => setTimeout(resolve, 220));
+                        await this.sendCommands([{ code: rgbEffectSchema.code, value: false }], false);
+                        // For a HomeKit-originated OFF, completion of the
+                        // accepted true->false sequence is authoritative. DP103
+                        // is still retained for external Smart Life feedback.
+                        this.setRgbPowerState(false);
+                        onCharacteristic.updateValue(false);
+                    }
+                    finally {
+                        this.rgbOffPromise = undefined;
+                    }
+                })();
+            }
+            return this.rgbOffPromise;
         });
     }
     async onDeviceStatusUpdate(status) {

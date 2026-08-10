@@ -1,3 +1,13 @@
+# 1.0.53
+
+- Fixed the remaining HomeKit RGB OFF state issue for the verified dual-light ceiling fan (`product_id: atfenlerda169ygw`).
+- HomeKit RGB OFF now performs exactly one serialized `colour_switch=true` -> short delay -> `colour_switch=false` sequence, matching the firmware behavior observed in Smart Life.
+- Removed the previous `colour_switch=false` first attempt and delayed fallback, which could create several overlapping OFF timers and repeated colour/effect flashes.
+- Added an in-flight RGB OFF promise so duplicate HomeKit OFF writes are coalesced into one hardware operation.
+- After the final `colour_switch=false` succeeds, the plugin explicitly sets synthetic `rgb_light_power=false` and updates HomeKit `On=false` instead of waiting indefinitely for DP103 `off`.
+- DP103 remains external status feedback: `off` means RGB OFF, while `mode_*` means RGB/effect active.
+- Normal static RGB ON remains unchanged: it re-sends the last `colour_data` HSV value and never uses `colour_switch=true`.
+
 # 1.0.52
 
 - Fixed RGB OFF for the verified dual-light ceiling fan (`product_id: atfenlerda169ygw`).
