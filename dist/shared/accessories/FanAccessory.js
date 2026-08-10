@@ -132,7 +132,7 @@ class FanAccessory extends BaseAccessory_1.default {
         });
         this.configureRgbPower(rgbService, color, whiteOn, rgbEffect);
         this.seedLastRgbColor(color);
-        this.log.info('Detected dual-light fan firmware: white light + static RGB light (DP103 status, colour_data HSV); RGB OFF uses one serialized colour_switch=true -> false sequence required by this firmware.');
+        this.log.info('Detected dual-light fan firmware: white light + static RGB light (DP103 status, colour_data HSV); RGB OFF uses one colour_switch=false command and never enters effect mode.');
     }
     parseRgbPowerValue(value) {
         if (typeof value === 'boolean') {
@@ -249,8 +249,8 @@ class FanAccessory extends BaseAccessory_1.default {
             .onSet(async (value) => {
             const turnOn = !!value;
             if (turnOn) {
-                // Serialize a later ON behind any already-running OFF sequence
-                // so both operations cannot race each other.
+                // Serialize a later ON behind any already-running OFF write so
+                // both operations cannot race each other.
                 if (this.rgbOffPromise) {
                     try {
                         await this.rgbOffPromise;
@@ -265,6 +265,7 @@ class FanAccessory extends BaseAccessory_1.default {
                 // last static HSV colour instead.
                 const lastColor = this.getLastRgbColor(colorSchema);
                 await this.sendRgbColorPreservingWhite(colorSchema, whiteOnSchema, lastColor);
+                this.rgbOffSuppressUntil = 0;
                 this.setRgbPowerState(true);
                 onCharacteristic.updateValue(true);
                 return;
@@ -273,26 +274,41 @@ class FanAccessory extends BaseAccessory_1.default {
                 this.log.warn('Cannot turn RGB off: writable colour_switch schema is missing.');
                 throw new Error('RGB OFF is unavailable because colour_switch is missing.');
             }
-            // HomeKit can issue repeated OFF writes while characteristics are
-            // refreshed. Coalesce all of them into ONE hardware transaction so
-            // this firmware flashes its effect mode only once.
+            // If HomeKit repeats OFF after we have already completed the write,
+            // acknowledge it locally instead of sending another cloud command.
+            if (this.getRgbPowerState() === false) {
+                onCharacteristic.updateValue(false);
+                return;
+            }
+            // HomeKit can issue several OFF writes while characteristics are
+            // refreshed. Coalesce concurrent writes into one cloud operation.
             if (!this.rgbOffPromise) {
                 this.rgbOffPromise = (async () => {
                     try {
-                        // Verified device behavior: the static RGB channel has
-                        // no direct OFF action in Smart Life. It turns off only
-                        // after entering an RGB effect and then disabling it:
-                        //   colour_switch=true  -> enter effect mode
-                        //   colour_switch=false -> exit effect mode / RGB off
-                        this.log.info('Turning static RGB off using one serialized effect-toggle sequence.');
-                        await this.sendCommands([{ code: rgbEffectSchema.code, value: true }], false);
-                        await new Promise(resolve => setTimeout(resolve, 220));
-                        await this.sendCommands([{ code: rgbEffectSchema.code, value: false }], false);
-                        // For a HomeKit-originated OFF, completion of the
-                        // accepted true->false sequence is authoritative. DP103
-                        // is still retained for external Smart Life feedback.
+                        // User testing proved that a plain colour_switch=false
+                        // is accepted by the HA QR API and turns the static RGB
+                        // channel off. Never send colour_switch=true here: TRUE
+                        // is the rainbow/effect mode and causes a visible flash.
+                        this.log.info('Turning static RGB off with colour_switch=false.');
+                        const result = await this.sendCommands([{ code: rgbEffectSchema.code, value: false }], false);
+                        if (result === false) {
+                            throw new Error('Tuya rejected colour_switch=false');
+                        }
+                        // For a HomeKit-originated OFF, the successful command is
+                        // authoritative. Do not wait for DP103, which may not be
+                        // emitted for this path. Ignore a short burst of stale
+                        // colour_data reports so they cannot immediately turn the
+                        // synthetic HomeKit power state back on.
+                        this.rgbOffSuppressUntil = Date.now() + 900;
                         this.setRgbPowerState(false);
                         onCharacteristic.updateValue(false);
+                    }
+                    catch (error) {
+                        // Keep HomeKit aligned with the last known active state if
+                        // the cloud write really failed.
+                        this.setRgbPowerState(true);
+                        onCharacteristic.updateValue(true);
+                        throw error;
                     }
                     finally {
                         this.rgbOffPromise = undefined;
@@ -311,10 +327,14 @@ class FanAccessory extends BaseAccessory_1.default {
                     const normalizedColor = this.normalizeRgbColor(item.value);
                     if (normalizedColor) {
                         this.accessory.context.rgbLastColourData = normalizedColor;
-                        // On this product, a static colour report means the RGB
-                        // LEDs have been activated, even if no separate boolean
-                        // power code was reported alongside it.
-                        this.setRgbPowerState(true);
+                        // On this product, a static colour report normally means
+                        // the RGB LEDs are active. Immediately after a successful
+                        // HomeKit OFF, however, Tuya can echo stale colour_data;
+                        // suppress only that short echo window so HomeKit does
+                        // not jump back to ON after the light is already off.
+                        if (!(this.rgbOffSuppressUntil && Date.now() < this.rgbOffSuppressUntil)) {
+                            this.setRgbPowerState(true);
+                        }
                     }
                     continue;
                 }

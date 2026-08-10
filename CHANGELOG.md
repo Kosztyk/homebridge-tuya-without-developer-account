@@ -1,3 +1,12 @@
+# 1.0.54
+
+- Simplified RGB OFF for the verified dual-light ceiling fan (`product_id: atfenlerda169ygw`) based on the latest user trace.
+- HomeKit RGB OFF now sends **only** `colour_switch=false`. The previous `colour_switch=true -> false` effect-toggle sequence was removed because `true` activates the rainbow/effect mode and causes a visible flash.
+- A successful `colour_switch=false` cloud response is treated as authoritative for a HomeKit-originated OFF, so the plugin no longer waits for DP103 `off` before updating the HomeKit switch.
+- Concurrent/repeated HomeKit OFF writes are coalesced, and OFF requests received after the synthetic RGB state is already false do not generate additional Tuya commands.
+- Added a short stale-`colour_data` suppression window after OFF so delayed MQTT colour echoes cannot immediately flip the HomeKit RGB switch back to ON.
+- Normal static RGB ON remains unchanged: the plugin re-sends the last HSV `colour_data` and never uses `colour_switch=true`.
+
 # 1.0.53
 
 - Fixed the remaining HomeKit RGB OFF state issue for the verified dual-light ceiling fan (`product_id: atfenlerda169ygw`).
