@@ -1,3 +1,12 @@
+# 1.0.55
+
+- Fixed discrete integer fan-speed mapping in Apple Home/HomeKit.
+- Tuya `fan_speed` levels are now translated to HomeKit's 0-100% `RotationSpeed` range instead of exposing raw level numbers as percentages.
+- A six-speed fan (`fan_speed` 1..6) now reports approximately 17%, 33%, 50%, 67%, 83%, and 100% for levels 1 through 6.
+- HomeKit percentage writes are quantized back to the nearest supported Tuya fan-speed level.
+- Explicit percentage schemas such as `fan_speed_percent` keep their native percentage behavior.
+- The change is generic for discrete integer `fan_speed` devices and does not alter the product-specific RGB/white-light fixes from v1.0.54.
+
 # 1.0.54
 
 - Simplified RGB OFF for the verified dual-light ceiling fan (`product_id: atfenlerda169ygw`) based on the latest user trace.
