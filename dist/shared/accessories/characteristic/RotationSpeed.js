@@ -25,7 +25,10 @@ function configureRotationSpeed(accessory, service, schema) {
         const props = {
             minValue: 0,
             maxValue: 100,
-            minStep: 1,
+            // Expose the physical number of fan levels instead of a 100-step
+            // slider. For six speeds this is 16.666...%, which Apple Home
+            // renders as approximately 17/33/50/67/83/100%.
+            minStep: 100 / levelCount,
         };
         const rawToPercent = (rawValue) => {
             const raw = Number(rawValue);
@@ -49,7 +52,7 @@ function configureRotationSpeed(accessory, service, schema) {
             return (0, util_1.limit)(raw, rawMin, rawMax);
         };
         accessory.log.debug(`Set discrete RotationSpeed mapping for ${schema.code}: ${rawMin}..${rawMax} step ${rawStep} (${levelCount} levels) -> HomeKit 0..100%`);
-        service.getCharacteristic(accessory.Characteristic.RotationSpeed)
+        const characteristic = service.getCharacteristic(accessory.Characteristic.RotationSpeed)
             .onGet(() => {
             const status = accessory.getStatus(schema.code);
             return rawToPercent(status?.value);
@@ -58,8 +61,13 @@ function configureRotationSpeed(accessory, service, schema) {
             const speed = percentToRaw(value);
             accessory.log.debug(`Map HomeKit RotationSpeed ${value}% -> ${schema.code}=${speed}`);
             await accessory.sendCommands([{ code: schema.code, value: speed }], true);
-        })
-            .setProps(props);
+        });
+        characteristic.setProps(props);
+        // HomeKit may have cached the old Tuya 1..6 metadata from versions
+        // before the percentage migration. Seed a valid percentage value on
+        // the newly migrated fan service immediately.
+        const currentStatus = accessory.getStatus(schema.code);
+        characteristic.updateValue(rawToPercent(currentStatus?.value));
         return;
     }
     const props = {

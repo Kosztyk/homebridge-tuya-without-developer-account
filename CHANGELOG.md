@@ -1,3 +1,13 @@
+# 1.0.56
+
+- Fixed Apple Home showing impossible fan speeds such as ~285% after the v1.0.55 six-speed percentage migration.
+- The cause was stale HomeKit service metadata: older plugin versions exposed `fan_speed` with `maxValue=6`, while v1.0.55 started returning percentage values such as 17. Apple Home could retain the old maximum and display 17 relative to 6.
+- Discrete integer `fan_speed` devices now use a stable refreshed fan-service subtype (`fan_speed_percent_v2`) so HomeKit receives new 0-100% RotationSpeed metadata. The accessory UUID remains unchanged.
+- The RotationSpeed `minStep` now reflects the physical level count (`100 / levelCount`) instead of exposing a 100-step slider. A six-speed fan therefore has six usable non-zero positions at approximately 17%, 33%, 50%, 67%, 83%, and 100%.
+- The current mapped percentage is seeded immediately after applying the new characteristic properties.
+- Percentage-native schemas such as `fan_speed_percent` are unchanged.
+- RGB/white-light fixes from v1.0.54 remain unchanged.
+
 # 1.0.55
 
 - Fixed discrete integer fan-speed mapping in Apple Home/HomeKit.

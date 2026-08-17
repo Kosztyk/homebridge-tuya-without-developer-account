@@ -355,10 +355,50 @@ class FanAccessory extends BaseAccessory_1.default {
         }
         return this.Service.Fan;
     }
+    fanServiceSubtype() {
+        const schema = this.getFanSpeedSchema();
+        if (!schema) {
+            return undefined;
+        }
+        const code = String(schema.code || '').toLowerCase();
+        const property = schema.property || {};
+        const min = Number(property.min);
+        const max = Number(property.max);
+        // Percentage-native schemas already use HomeKit-compatible metadata.
+        // Only discrete integer fan_speed ranges need the service migration.
+        if (code.includes('percent') || !Number.isFinite(min) || !Number.isFinite(max) || max < min) {
+            return undefined;
+        }
+        return 'fan_speed_percent_v2';
+    }
     fanService() {
         const serviceType = this.fanServiceType();
-        return this.accessory.getService(serviceType)
-            || this.accessory.addService(serviceType);
+        const subtype = this.fanServiceSubtype();
+        if (!subtype) {
+            return this.accessory.getService(serviceType)
+                || this.accessory.addService(serviceType);
+        }
+        const migratedService = this.accessory.getServiceById(serviceType, subtype);
+        if (migratedService) {
+            // Clean up a pre-v1.0.56 un-subtyped Fan/Fanv2 service if one was
+            // restored alongside the migrated service.
+            const legacyService = this.accessory.getService(serviceType);
+            if (legacyService && legacyService !== migratedService && legacyService.subtype !== subtype) {
+                this.accessory.removeService(legacyService);
+            }
+            return migratedService;
+        }
+        // v1.0.55 changed RotationSpeed metadata from raw 1..6 to 0..100%.
+        // Apple Home can retain the old maxValue=6 for an existing service,
+        // causing 17% to render as roughly 17/6*100 = 283-285%. Give the fan
+        // service a stable new subtype once so HomeKit receives fresh
+        // characteristic metadata. The accessory UUID itself is unchanged.
+        const legacyService = this.accessory.getService(serviceType);
+        if (legacyService) {
+            this.accessory.removeService(legacyService);
+        }
+        this.log.info('Migrating discrete fan-speed service to refreshed HomeKit percentage metadata.');
+        return this.accessory.addService(serviceType, `${this.accessory.displayName} Fan`, subtype);
     }
     lightServiceType() {
         if (this.getSchema(...SCHEMA_CODE.LIGHT_BRIGHT)
