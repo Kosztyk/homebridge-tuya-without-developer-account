@@ -1,3 +1,13 @@
+# 1.0.57
+
+- Added support for additional Tuya `qxj` temperature/humidity datapoints used by devices such as temperature/humidity sensors with external probes.
+- `WeatherStationAccessory` now recognizes `temp_current` and `temp_current_external*` as Celsius temperature schemas while preserving existing `ToutCh*` support.
+- `temp_current_f` is deliberately excluded from the Celsius path to avoid exposing Fahrenheit values to HomeKit as Celsius.
+- Added `humidity_value` detection while preserving existing `HoutCh*` support.
+- Humidity values now honor the Tuya schema `scale`, so both unscaled values such as `65` (`scale: 0`) and scaled values such as `653` (`scale: 1`) are exposed correctly as 65% and 65.3%.
+- Humidity is clamped to HomeKit's valid 0-100% range.
+- All fan/RGB changes from v1.0.56 remain unchanged.
+
 # 1.0.56
 
 - Fixed Apple Home showing impossible fan speeds such as ~285% after the v1.0.55 six-speed percentage migration.

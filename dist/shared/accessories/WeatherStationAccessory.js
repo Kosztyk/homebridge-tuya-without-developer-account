@@ -34,9 +34,14 @@ class TemperatureHumiditySensorAccessory extends BaseAccessory_1.default {
                 .onGet(() => {
                 const status = this.getStatus(schema.code);
                 if (status) {
-                    return status.value;
+                    const property = this.getSchema(schema.code)?.property;
+                    const multiple = Math.pow(10, property?.scale || 0);
+                    const value = Number(status.value) / multiple;
+                    if (Number.isFinite(value)) {
+                        return Math.min(Math.max(value, 0), 100);
+                    }
                 }
-                return 0; // Default value if no status is found
+                return 0; // Default value if no valid status is found
             });
         });
     }
@@ -44,10 +49,17 @@ class TemperatureHumiditySensorAccessory extends BaseAccessory_1.default {
         const temperatureSchemas = [];
         const humiditySchemas = [];
         this.device.schema.forEach((schema) => {
-            if (schema.code.includes('ToutCh')) {
+            const code = String(schema.code || '');
+            if (code.includes('ToutCh') ||
+                code === 'temp_current' ||
+                code.startsWith('temp_current_external')) {
+                // `temp_current_f` is intentionally not matched here: this
+                // accessory publishes HomeKit temperatures in Celsius and does
+                // not perform Fahrenheit-to-Celsius conversion.
                 temperatureSchemas.push(schema);
             }
-            else if (schema.code.includes('HoutCh')) {
+            else if (code.includes('HoutCh') ||
+                code === 'humidity_value') {
                 humiditySchemas.push(schema);
             }
         });
