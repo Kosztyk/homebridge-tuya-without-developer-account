@@ -21,29 +21,20 @@ class GarageDoorAccessory extends BaseAccessory_1.default {
             || this.accessory.addService(this.Service.GarageDoorOpener);
     }
     configureCurrentDoorState() {
-        const { OPEN, CLOSED, OPENING, CLOSING, STOPPED } = this.Characteristic.CurrentDoorState;
+        const { OPEN, CLOSED, STOPPED } = this.Characteristic.CurrentDoorState;
         this.mainService().getCharacteristic(this.Characteristic.CurrentDoorState)
             .onGet(() => {
             const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_DOOR_STATE);
-            const targetSchema = this.getSchema(...SCHEMA_CODE.TARGET_DOOR_STATE);
-            if (!currentSchema || !targetSchema) {
+            if (!currentSchema) {
                 return STOPPED;
             }
             const currentStatus = this.getStatus(currentSchema.code);
-            const targetStatus = this.getStatus(targetSchema.code);
-            if (currentStatus.value === true && targetStatus.value === true) {
-                return OPEN;
+            // Physical remotes update the contact sensor without updating switch_1.
+            // A command value is not evidence of motion or of the actual door state.
+            if (typeof currentStatus?.value !== 'boolean') {
+                return STOPPED;
             }
-            else if (currentStatus.value === false && targetStatus.value === false) {
-                return CLOSED;
-            }
-            else if (currentStatus.value === false && targetStatus.value === true) {
-                return OPENING;
-            }
-            else if (currentStatus.value === true && targetStatus.value === false) {
-                return CLOSING;
-            }
-            return STOPPED;
+            return currentStatus.value ? OPEN : CLOSED;
         });
     }
     configureTargetDoorState() {
@@ -54,6 +45,11 @@ class GarageDoorAccessory extends BaseAccessory_1.default {
         const { OPEN, CLOSED } = this.Characteristic.TargetDoorState;
         this.mainService().getCharacteristic(this.Characteristic.TargetDoorState)
             .onGet(() => {
+            const currentSchema = this.getSchema(...SCHEMA_CODE.CURRENT_DOOR_STATE);
+            const currentStatus = currentSchema && this.getStatus(currentSchema.code);
+            if (typeof currentStatus?.value === 'boolean') {
+                return currentStatus.value ? OPEN : CLOSED;
+            }
             const status = this.getStatus(schema.code);
             return status.value ? OPEN : CLOSED;
         })
