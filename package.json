@@ -1,7 +1,7 @@
 {
   "name": "homebridge-tuya-without-developer-account",
   "displayName": "Tuya without developer account for Homebridge",
-  "version": "1.0.56",
+  "version": "1.0.58",
   "description": "Homebridge plugin for Tuya and Smart Life devices using QR cloud authentication without a Tuya IoT developer account.",
   "license": "MIT",
   "author": "Kosztyk",
@@ -23,7 +23,8 @@
   "main": "dist/index.js",
   "scripts": {
     "pack:check": "npm pack --dry-run",
-    "publish:public": "npm publish --access public"
+    "publish:public": "npm publish --access public",
+    "test": "node --test test/*.test.js"
   },
   "keywords": [
     "homebridge-plugin",

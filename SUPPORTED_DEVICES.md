@@ -293,3 +293,19 @@ v1.0.36: The custom Pet Feeder override UI was removed to avoid forcing unrelate
 Live Tuya Device Sharing MQTT traces confirm this fan has two physical light channels. `switch_led` controls the white lamp, `colour_data` carries static RGB HSV data, and proprietary raw DP `103` reports RGB state (`off`, `mode_10`, etc.). Raw DP103 is report-only through the HA QR command endpoint: attempting `103=off` is rejected with Tuya error `2008`. `colour_switch=true` starts the rainbow/effect mode and is therefore **never** used for normal RGB ON or OFF sequencing. The plugin exposes separate White Light and RGB Light HomeKit services, turns static RGB on by re-sending the last `colour_data`, and turns it off with a single `colour_switch=false` command. A successful HomeKit OFF write immediately updates the synthetic RGB/HomeKit power state instead of waiting for DP103; a short stale-colour suppression window prevents delayed MQTT `colour_data` echoes from turning the HomeKit tile back on. Incoming DP103 `off` still maps to RGB OFF, while `mode_*` maps to RGB active. RGB brightness is intentionally omitted because this firmware does not offer adjustable RGB brightness.
 
 Fan speed note: discrete integer `fan_speed` ranges are exposed to HomeKit as a 0-100% RotationSpeed control with one HomeKit step per physical fan level. For example, a six-level `fan_speed` range maps levels 1..6 to approximately 17%, 33%, 50%, 67%, 83%, and 100%. v1.0.56 also migrates these fans to refreshed HomeKit service metadata so controllers do not retain the legacy `maxValue=6` definition.
+
+### qxj temperature/humidity sensors
+
+`WeatherStationAccessory` supports both the legacy `ToutCh*` / `HoutCh*` datapoint naming and the newer `temp_current`, `temp_current_external*`, and `humidity_value` datapoints seen on some `qxj` sensors with external probes.
+
+Examples:
+
+- `temp_current` -> internal Celsius temperature
+- `temp_current_external` -> external probe Celsius temperature
+- `humidity_value` -> relative humidity, with Tuya `scale` applied
+
+`temp_current_f` is intentionally excluded because HomeKit's `CurrentTemperature` characteristic is Celsius and this accessory does not currently perform Fahrenheit conversion.
+
+### Garage-door openers (`ckmkzq`)
+
+The physical `doorcontact_state` sensor is used for HomeKit OPEN/CLOSED reporting even when a radio remote changes the door without updating the cached `switch_1` command state. HomeKit OPEN/CLOSE still writes `switch_1=true` / `switch_1=false`. During a HomeKit-initiated operation, the requested TargetDoorState remains pending until the contact sensor matches or a 45-second timeout expires; external state changes otherwise synchronize target and current states. A single boolean contact does not reveal opening/closing motion direction.
