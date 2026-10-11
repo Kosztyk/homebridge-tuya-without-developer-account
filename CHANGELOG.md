@@ -1,3 +1,12 @@
+# 1.0.59
+
+- Hardened the Homebridge `didFinishLaunching` callback: failed Tuya QR device initialization is caught and logged with the error stack instead of becoming an unhandled promise rejection in the child bridge process.
+- Hardened both `DEVICE_INFO_UPDATE` and `DEVICE_STATUS_UPDATE` paths: synchronous exceptions and asynchronously rejected accessory handler promises are now caught and logged with device context.
+- Does not include cloud credentials or raw status payloads in the new error logs.
+- Added dependency-free regression tests for startup rejection/synchronous failure, device handler rejection/synchronous failure, healthy handlers, absent handlers and error logging.
+- No changes to Tuya command writes, authentication, accessory identity, RGB/fan functionality, or garage door behavior.
+- These guards prevent crashes caused by errors in the covered callbacks; independent process failures or unhandled rejections elsewhere still require full logs for diagnosis. Initialization failures are logged but are not automatically retried.
+
 # 1.0.58
 
 - Fixed garage-door current state notifications for physical remotes on Tuya category `ckmkzq`: `doorcontact_state` now defines HomeKit OPEN/CLOSED independently of cached `switch_1` commands. Missing or invalid sensor data yields STOPPED.

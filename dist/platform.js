@@ -25,6 +25,20 @@ function readPersistedAdaptiveLighting(storagePath) {
   }
 }
 
+// Keep logs useful without dumping cloud tokens or full device/status objects.
+function describeDevice(device) {
+  const name = String(device?.name || device?.id || 'unknown device');
+  return JSON.stringify(name);
+}
+
+function formatPlatformError(error) {
+  // Include the stack when available to identify the failed code path.
+  if (error instanceof Error) {
+    return error.stack || error.message;
+  }
+  return String(error);
+}
+
 class TuyaPlatform {
   constructor(log, config, api) {
     this.log = log;
@@ -42,8 +56,16 @@ class TuyaPlatform {
 
     this.log.debug("Finished initializing Tuya QR-only platform");
     this.api.on("didFinishLaunching", async () => {
-      this.log.debug("Executed didFinishLaunching callback");
-      await this.initDevices();
+      try {
+        this.log.debug("Executed didFinishLaunching callback");
+        await this.initDevices();
+      } catch (error) {
+        // Homebridge does not await EventEmitter listeners. Never allow an
+        // initialization rejection to become an unhandled promise rejection
+        // that terminates the child bridge process.
+        this.log.error(`[Tuya QR] Device initialization failed: ${formatPlatformError(error)}`);
+        this.log.error('[Tuya QR] Initialization did not complete; review the error above and restart Homebridge after resolving it.');
+      }
     });
   }
 
@@ -954,20 +976,31 @@ class TuyaPlatform {
     }
   }
 
-  updateAccessoryInfo(device, info) {
-    const handler = this.getAccessoryHandler(device.id);
-    if (!handler) {
-      return;
+  async updateAccessoryInfo(device, info) {
+    try {
+      const handler = this.getAccessoryHandler(device?.id);
+      if (!handler) {
+        return;
+      }
+      // Device manager emits asynchronously and does not await listeners.
+      // Await the handler here so both synchronous exceptions and rejected
+      // promises are caught rather than crashing the bridge.
+      await handler.onDeviceInfoUpdate(info);
+    } catch (error) {
+      this.log.error(`[Tuya QR] Device info update failed for ${describeDevice(device)}: ${formatPlatformError(error)}`);
     }
-    handler.onDeviceInfoUpdate(info);
   }
 
-  updateAccessoryStatus(device, status) {
-    const handler = this.getAccessoryHandler(device.id);
-    if (!handler) {
-      return;
+  async updateAccessoryStatus(device, status) {
+    try {
+      const handler = this.getAccessoryHandler(device?.id);
+      if (!handler) {
+        return;
+      }
+      await handler.onDeviceStatusUpdate(status);
+    } catch (error) {
+      this.log.error(`[Tuya QR] Device status update failed for ${describeDevice(device)}: ${formatPlatformError(error)}`);
     }
-    handler.onDeviceStatusUpdate(status);
   }
 
   removeAccessory(deviceID) {
