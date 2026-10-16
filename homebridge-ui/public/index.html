@@ -216,6 +216,39 @@
   </p>
 </div>
 
+<div class="tuya-nodev-card" id="tuyaNodevFanPresetsCard">
+  <div class="tuya-nodev-title">Fan Speed Presets</div>
+  <p class="tuya-nodev-small mb-3">
+    Optional: limit a fan to configured HomeKit percentages, such as 25, 50, 75, 100.
+    Fans without an override keep their automatically detected Tuya speed intervals.
+    Apple Home still uses a percentage slider; the plugin snaps commands to the nearest permitted speed.
+  </p>
+  <div class="form-group">
+    <label for="tuyaNodevFanDevice">Select fan</label>
+    <select id="tuyaNodevFanDevice" class="form-control"><option value="">Load detected devices first...</option></select>
+  </div>
+  <div class="form-group">
+    <label for="tuyaNodevFanDeviceId">Fan Device ID</label>
+    <input id="tuyaNodevFanDeviceId" class="form-control" type="text" placeholder="Select a fan, or enter its Tuya device ID">
+  </div>
+  <div class="form-group">
+    <label for="tuyaNodevFanPresets">Allowed speeds (%)</label>
+    <input id="tuyaNodevFanPresets" class="form-control" type="text" inputmode="numeric" placeholder="25, 50, 75, 100">
+    <small class="form-text text-muted">Use 2–20 ascending whole-number percentages. Last value must be 100. For evenly spaced presets, HomeKit also gets a matching slider step.</small>
+  </div>
+  <div class="tuya-nodev-actions">
+    <button id="tuyaNodevLoadFans" class="btn btn-outline-primary" type="button">Load Detected Fans</button>
+    <button id="tuyaNodevApplyFan" class="btn btn-primary" type="button">Add / Update Fan Presets</button>
+    <button id="tuyaNodevRemoveFan" class="btn btn-outline-danger" type="button">Remove Preset Override</button>
+  </div>
+  <div id="tuyaNodevFanStatus" class="tuya-nodev-ac-status alert alert-secondary">Choose a fan and configure the intervals, then Save Configuration and restart.</div>
+  <div class="tuya-nodev-table-wrap">
+    <table class="tuya-nodev-table"><thead><tr><th>Fan</th><th>Device ID</th><th>Allowed speeds</th><th></th></tr></thead>
+      <tbody id="tuyaNodevFanOverrideRows"><tr><td colspan="4">No custom fan speed presets configured.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
 <div class="tuya-nodev-card">
   <div class="tuya-nodev-title">Blind / Window Covering Overrides</div>
   <p class="tuya-nodev-small mb-3">
@@ -408,6 +441,13 @@
 
   function setCoverStatus(message, type = 'secondary') {
     const el = $('tuyaNodevCoverStatus');
+    if (!el) return;
+    el.className = `tuya-nodev-ac-status alert alert-${type}`;
+    el.textContent = message;
+  }
+
+  function setFanStatus(message, type = 'secondary') {
+    const el = $('tuyaNodevFanStatus');
     if (!el) return;
     el.className = `tuya-nodev-ac-status alert alert-${type}`;
     el.textContent = message;
@@ -615,6 +655,7 @@
     renderSwitchNameOverrides();
     renderPetFeederOverrides();
     renderCoverOverrides();
+    renderFanPresetOverrides();
   }
 
   function stopPolling() {
@@ -1398,6 +1439,104 @@
     return detectedDevices.find((item) => item.id === id);
   }
 
+  function isFanSpeedDevice(device) {
+    const codes = [...(device?.schemaCodes || []), ...(device?.statusCodes || [])]
+      .map((code) => String(code || '').toLowerCase());
+    const category = String(device?.category || '').toLowerCase();
+    return codes.some((code) => ['fan_speed', 'fan_speed_enum', 'fan_speed_percent'].includes(code))
+      || ['fs', 'fsd', 'fskg'].includes(category);
+  }
+
+  function getFanPresetOverrides() {
+    const cfg = ensureConfig();
+    return (cfg.options.deviceOverrides || []).filter((item) => item && item.id
+      && item.fan && Array.isArray(item.fan.speedPresets) && item.fan.speedPresets.length);
+  }
+
+  function populateFanDeviceSelect(devices) {
+    const select = $('tuyaNodevFanDevice');
+    if (!select) return;
+    const old = select.value;
+    const fans = new Map();
+    for (const device of devices || []) {
+      if (isFanSpeedDevice(device)) fans.set(device.id, device);
+    }
+    // Saved overrides remain selectable even if the discovery cache is empty.
+    for (const override of getFanPresetOverrides()) {
+      if (!fans.has(override.id)) fans.set(override.id, { id: override.id, name: getDeviceName(override.id) || 'Saved fan override' });
+    }
+    select.innerHTML = '<option value="">Select a fan...</option>'
+      + [...fans.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+        .map((device) => `<option value="${escapeHtml(device.id)}">${escapeHtml(device.name || device.id)} — ${escapeHtml(device.id)}</option>`).join('');
+    if (old && fans.has(old)) select.value = old;
+  }
+
+  function renderFanPresetOverrides() {
+    const tbody = $('tuyaNodevFanOverrideRows');
+    if (!tbody) return;
+    const overrides = getFanPresetOverrides();
+    tbody.innerHTML = overrides.length ? overrides.map((item) => `
+      <tr><td>${escapeHtml(getDeviceName(item.id) || item.id)}</td><td><code>${escapeHtml(item.id)}</code></td>
+        <td>${escapeHtml(item.fan.speedPresets.join(', '))}%</td>
+        <td><button type="button" class="btn btn-sm btn-outline-secondary tuya-nodev-edit-fan" data-id="${escapeHtml(item.id)}">Edit</button></td></tr>`).join('')
+      : '<tr><td colspan="4" class="tuya-nodev-small">No custom fan speed presets configured.</td></tr>';
+    tbody.querySelectorAll('.tuya-nodev-edit-fan').forEach((button) => {
+      button.addEventListener('click', () => {
+        const id = button.getAttribute('data-id');
+        $('tuyaNodevFanDeviceId').value = id;
+        const availableOption = [...$('tuyaNodevFanDevice').options].some((option) => option.value === id);
+        if (availableOption) $('tuyaNodevFanDevice').value = id;
+        const override = findDeviceOverride(id);
+        $('tuyaNodevFanPresets').value = override?.fan?.speedPresets?.join(', ') || '';
+      });
+    });
+  }
+
+  function parseFanPresetInput(input) {
+    const parts = String(input || '').split(/[;,\s]+/).filter(Boolean);
+    const values = parts.map((item) => Number(item));
+    if (values.length < 2 || values.length > 20
+      || values.some((value) => !Number.isInteger(value) || value < 1 || value > 100)
+      || values[values.length - 1] !== 100
+      || values.some((value, index) => index > 0 && value <= values[index - 1])) {
+      throw new Error('Enter 2–20 strictly ascending integer percentages ending in 100. Example: 25, 50, 75, 100.');
+    }
+    return values;
+  }
+
+  async function applyFanPresetOverride() {
+    try {
+      const id = ($('tuyaNodevFanDeviceId').value || $('tuyaNodevFanDevice').value || '').trim();
+      if (!id) throw new Error('Select a fan or enter its Tuya device ID.');
+      const known = getDetectedDeviceById(id);
+      if (known && !isFanSpeedDevice(known)) throw new Error('This detected device does not expose a fan speed datapoint.');
+      const values = parseFanPresetInput($('tuyaNodevFanPresets').value);
+      ensureDeviceOverride(id).fan = { speedPresets: values };
+      await syncConfigToUi();
+      populateFanDeviceSelect(detectedDevices);
+      $('tuyaNodevFanDevice').value = id;
+      markDirty();
+      setFanStatus(`Saved ${values.join(', ')}% in the staged configuration. Click Save Configuration and restart Homebridge.`, 'success');
+    } catch (error) {
+      setFanStatus(error.message || 'Could not configure fan presets.', 'danger');
+    }
+  }
+
+  async function removeFanPresetOverride() {
+    const id = ($('tuyaNodevFanDeviceId').value || $('tuyaNodevFanDevice').value || '').trim();
+    if (!id) { setFanStatus('Select a fan first.', 'warning'); return; }
+    const override = findDeviceOverride(id);
+    if (override) {
+      delete override.fan;
+      removeEmptyDeviceOverride(id);
+      await syncConfigToUi();
+      populateFanDeviceSelect(detectedDevices);
+      markDirty();
+    }
+    $('tuyaNodevFanPresets').value = '';
+    setFanStatus(`Removed custom fan presets for ${id}. Click Save Configuration and restart to restore automatic speed mapping.`, 'success');
+  }
+
   function isKnownDeviceAllowed(id, detector) {
     const device = getDetectedDeviceById(id);
     if (!device) {
@@ -1484,6 +1623,7 @@
     populateSwitchDeviceSelect(devices);
     populatePetFeederDeviceSelect(devices);
     populateCoverDeviceSelect(devices);
+    populateFanDeviceSelect(devices);
   }
 
   function cleanupMixedOverridesUsingDetectedDevices() {
@@ -1507,6 +1647,7 @@
       renderSwitchNameOverrides();
       renderPetFeederOverrides();
       renderCoverOverrides();
+      renderFanPresetOverrides();
       const acCount = detectedDevices.filter((device) => device.likelyAirConditioner).length;
       const coverCount = detectedDevices.filter(isWindowCoveringDevice).length;
       const petCount = detectedDevices.filter(isPetFeederDevice).length;
@@ -1829,6 +1970,11 @@
         await persistSwitchNamesToDisk(visibleSwitchNameResult.id, override?.switchNames || {});
       }
       isSavingConfig = true;
+      // Compare before/after config.json so a stale Homebridge form cannot silently
+      // drop the new fan override while still displaying a success toast.
+      const expectedFanPresets = JSON.stringify(getFanPresetOverrides()
+        .map((entry) => ({ id: entry.id, speeds: entry.fan.speedPresets }))
+        .sort((a, b) => a.id.localeCompare(b.id)));
 
       // Save directly to Homebridge config.json through the custom UI backend. This is
       // deliberately used instead of relying only on Homebridge UI's staged
@@ -1849,7 +1995,11 @@
       try {
         await delay(500);
         const loaded = await loadPlatformConfigFromDisk();
-        verified = loaded && currentConfig?.options?.userCode === userCode;
+        const savedFanPresets = JSON.stringify(getFanPresetOverrides()
+          .map((entry) => ({ id: entry.id, speeds: entry.fan.speedPresets }))
+          .sort((a, b) => a.id.localeCompare(b.id)));
+        verified = loaded && currentConfig?.options?.userCode === userCode
+          && savedFanPresets === expectedFanPresets;
       } catch (e) {
         verified = false;
       }
@@ -1945,6 +2095,7 @@
           renderSwitchChannelEditor();
           renderPetFeederOverrides();
           renderCoverOverrides();
+          renderFanPresetOverrides();
         }
       });
 
@@ -2024,6 +2175,14 @@
         disableSaving();
         syncConfigToUi();
       });
+      $('tuyaNodevFanDevice').addEventListener('change', () => {
+        const id = $('tuyaNodevFanDevice').value;
+        $('tuyaNodevFanDeviceId').value = id;
+        $('tuyaNodevFanPresets').value = findDeviceOverride(id)?.fan?.speedPresets?.join(', ') || '';
+      });
+      $('tuyaNodevLoadFans').addEventListener('click', () => loadDetectedDevices(true));
+      $('tuyaNodevApplyFan').addEventListener('click', applyFanPresetOverride);
+      $('tuyaNodevRemoveFan').addEventListener('click', removeFanPresetOverride);
       $('tuyaNodevLoadDevices').addEventListener('click', () => loadDetectedDevices(true));
       $('tuyaNodevApplyAc').addEventListener('click', addOrUpdateAcOverride);
       $('tuyaNodevRemoveAc').addEventListener('click', removeSelectedAcOverride);

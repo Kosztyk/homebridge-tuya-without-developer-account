@@ -10,6 +10,7 @@ const AccessoryFactory = require("./shared/accessories/AccessoryFactory").defaul
 const { sanitizeName } = require("./shared/util/util");
 const { ConfigHash } = require("./shared/util/ConfigHash");
 const { PLUGIN_NAME, PLATFORM_NAME } = require("./settings");
+const { normalizeFanSpeedPresets } = require("./shared/accessories/characteristic/FanSpeedPresets");
 
 function safeUserCode(userCode) {
   return String(userCode || "").replace(/[^a-zA-Z0-9_.-]/g, "_");
@@ -196,6 +197,16 @@ class TuyaPlatform {
       // but config-level petFeeder options are ignored to avoid mixing device types.
       if (item.petFeeder !== undefined) {
         delete item.petFeeder;
+      }
+      // Strict, per-device fan presets. An invalid override must not break QR startup.
+      if (item.fan !== undefined) {
+        const presets = normalizeFanSpeedPresets(item.fan?.speedPresets);
+        if (presets) {
+          item.fan = { speedPresets: presets };
+        } else {
+          this.log.warn('[Tuya QR] Ignoring invalid fan.speedPresets override for id "%s". Use 2-20 ascending integer percentages ending at 100 (e.g. 25,50,75,100).', id);
+          delete item.fan;
+        }
       }
       if (item.alarm && typeof item.alarm === 'object') {
         const normalizedAlarm = {};
@@ -507,6 +518,7 @@ class TuyaPlatform {
         airConditioner: deviceConfig?.airConditioner ? JSON.stringify(deviceConfig.airConditioner) : undefined,
         alarm: deviceConfig?.alarm ? JSON.stringify(deviceConfig.alarm) : undefined,
         windowCovering: deviceConfig?.windowCovering ? JSON.stringify(deviceConfig.windowCovering) : undefined,
+        fan: deviceConfig?.fan ? JSON.stringify(deviceConfig.fan) : undefined,
         globalAdaptiveLighting: !!this.options.enableAdaptiveLighting,
         adaptiveLighting: deviceConfig?.adaptiveLighting ? JSON.stringify(deviceConfig.adaptiveLighting) : undefined,
         globalPreserveHomeKitNames: this.options.preserveHomeKitNames !== false,
@@ -721,6 +733,7 @@ class TuyaPlatform {
       delete scoped.category;
       delete scoped.petFeeder;
       delete scoped.windowCovering;
+      delete scoped.fan;
       delete scoped.airConditioner;
       delete scoped.switchNames;
       return scoped;

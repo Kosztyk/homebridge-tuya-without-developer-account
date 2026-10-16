@@ -638,3 +638,19 @@ Special override sections are isolated by detected device type. Pet Feeder optio
 The custom Pet Feeder override UI was removed because Apple Home does not provide a native Pet Feeder tile and forcing device categories from the UI could accidentally mix blinds, switches, and feeder settings. Real Tuya pet feeders still work automatically when Tuya reports category `cwwsq`.
 
 HomeKit naming is now based on the names saved in Homebridge configuration. For multi-gang switches/outlets, set `deviceOverrides[].switchNames` with every channel that should appear in Apple Home, for example `switch_1`, `switch_2`, and `switch_3`. If Apple Home has already cached stale names, set or change `options.homeKitNameReimportToken` once, save, and restart Homebridge.
+
+
+### Optional fan speed presets (v1.1.0)
+
+For a fan with a 0-100% slider, open **Plugins → Tuya without developer account → Settings → Fan Speed Presets**. Load detected fans, choose one, enter `25, 50, 75, 100`, click **Add / Update**, then **Save Configuration** and restart Homebridge. Defaults remain unchanged for all other devices.
+
+Or configure one fan manually under its existing override:
+
+```json
+{
+  "id": "YOUR_FAN_DEVICE_ID",
+  "fan": { "speedPresets": [25, 50, 75, 100] }
+}
+```
+
+Allowed values: 2–20 strictly ascending integer percentages in the range 1–100, with 100 as the last entry. The plugin rounds requests to the nearest preset (ties round up). Physical Tuya speeds are respected, so on fans with fewer hardware levels a preset may correspond to the nearest available physical speed. Zero continues to represent the HomeKit stop position; the existing fan on/off control remains separate. Native Apple Home still displays a slider rather than dedicated preset buttons. Unevenly spaced presets (e.g. 20, 50, 75, 100) snap in the plugin, but Apple Home cannot be made to visually enforce irregular stops through `minStep` alone.

@@ -4,11 +4,13 @@ exports.configureRotationSpeed = configureRotationSpeed;
 exports.configureRotationSpeedLevel = configureRotationSpeedLevel;
 exports.configureRotationSpeedOn = configureRotationSpeedOn;
 const util_1 = require("../../util/util");
-function configureRotationSpeed(accessory, service, schema) {
+const { normalizeFanSpeedPresets, snapFanSpeed, fanPresetMinStep } = require("./FanSpeedPresets");
+function configureRotationSpeed(accessory, service, schema, configuredPresets) {
     if (!schema) {
         return;
     }
-    const property = schema.property;
+    const presets = normalizeFanSpeedPresets(configuredPresets);
+    const property = schema.property || {};
     const multiple = Math.pow(10, property.scale || 0);
     const rawMin = Number(property.min);
     const rawMax = Number(property.max);
@@ -28,7 +30,7 @@ function configureRotationSpeed(accessory, service, schema) {
             // Expose the physical number of fan levels instead of a 100-step
             // slider. For six speeds this is 16.666...%, which Apple Home
             // renders as approximately 17/33/50/67/83/100%.
-            minStep: 100 / levelCount,
+            minStep: presets ? fanPresetMinStep(presets) : 100 / levelCount,
         };
         const rawToPercent = (rawValue) => {
             const raw = Number(rawValue);
@@ -37,10 +39,11 @@ function configureRotationSpeed(accessory, service, schema) {
             }
             const clampedRaw = (0, util_1.limit)(raw, rawMin, rawMax);
             const levelIndex = Math.round((clampedRaw - rawMin) / rawStep) + 1;
-            return (0, util_1.limit)(Math.round(levelIndex * 100 / levelCount), 1, 100);
+            const physicalPercent = (0, util_1.limit)(Math.round(levelIndex * 100 / levelCount), 1, 100);
+            return presets ? snapFanSpeed(physicalPercent, presets) : physicalPercent;
         };
         const percentToRaw = (percentValue) => {
-            const percent = (0, util_1.limit)(Number(percentValue) || 0, 0, 100);
+            const percent = presets ? snapFanSpeed(percentValue, presets) : (0, util_1.limit)(Number(percentValue) || 0, 0, 100);
             // RotationSpeed=0 is HomeKit's stopped value. The fan's actual
             // on/off state is handled separately, so a non-zero request maps
             // to one of the Tuya speed levels.
@@ -61,6 +64,7 @@ function configureRotationSpeed(accessory, service, schema) {
             const speed = percentToRaw(value);
             accessory.log.debug(`Map HomeKit RotationSpeed ${value}% -> ${schema.code}=${speed}`);
             await accessory.sendCommands([{ code: schema.code, value: speed }], true);
+            if (presets) characteristic.updateValue(snapFanSpeed(value, presets));
         });
         characteristic.setProps(props);
         // HomeKit may have cached the old Tuya 1..6 metadata from versions
@@ -73,24 +77,41 @@ function configureRotationSpeed(accessory, service, schema) {
     const props = {
         minValue: rawMin / multiple,
         maxValue: rawMax / multiple,
-        minStep: Math.max(1, rawStep / multiple),
+        minStep: presets ? fanPresetMinStep(presets) : Math.max(1, rawStep / multiple),
     };
-    service.getCharacteristic(accessory.Characteristic.RotationSpeed)
+    if (presets) {
+        // Native percentage schemas may use scaled raw units and non-unit raw steps.
+        // Expose user-defined 0..100% intervals, but never write unsupported raw steps.
+        props.minValue = 0;
+        props.maxValue = 100;
+    }
+    const characteristic = service.getCharacteristic(accessory.Characteristic.RotationSpeed)
         .onGet(() => {
         const status = accessory.getStatus(schema.code);
-        const value = status.value / multiple;
-        return (0, util_1.limit)(value, props.minValue, props.maxValue);
+        if (!status) return 0;
+        const value = (0, util_1.limit)(Number(status.value) / multiple, presets ? 0 : props.minValue, presets ? 100 : props.maxValue);
+        return presets ? snapFanSpeed(value, presets) : value;
     })
         .onSet(async (value) => {
-        const speed = value * multiple;
+        const target = presets ? snapFanSpeed(value, presets) : value;
+        const rawValue = target * multiple;
+        const speed = presets
+            ? (0, util_1.limit)(rawMin + Math.round((rawValue - rawMin) / rawStep) * rawStep, rawMin, rawMax)
+            : rawValue;
         await accessory.sendCommands([{ code: schema.code, value: speed }], true);
+        if (presets) characteristic.updateValue(snapFanSpeed(speed / multiple, presets));
     })
         .setProps(props);
+    if (presets) {
+        const status = accessory.getStatus(schema.code);
+        characteristic.updateValue(status ? snapFanSpeed(Number(status.value) / multiple, presets) : 0);
+    }
 }
-function configureRotationSpeedLevel(accessory, service, schema, ignoreValues) {
+function configureRotationSpeedLevel(accessory, service, schema, ignoreValues, configuredPresets) {
     if (!schema) {
         return;
     }
+    const presets = normalizeFanSpeedPresets(configuredPresets);
     const property = schema.property;
     const range = [];
     for (const value of property.range) {
@@ -99,18 +120,22 @@ function configureRotationSpeedLevel(accessory, service, schema, ignoreValues) {
         }
         range.push(value);
     }
-    const props = { minValue: 0, maxValue: range.length, minStep: 1, unit: 'speed' };
+    const props = presets
+        ? { minValue: 0, maxValue: 100, minStep: fanPresetMinStep(presets) }
+        : { minValue: 0, maxValue: range.length, minStep: 1, unit: 'speed' };
     accessory.log.debug('Set props for RotationSpeed:', props);
     const onGetHandler = () => {
         const status = accessory.getStatus(schema.code);
         const index = range.indexOf(status.value);
-        return (0, util_1.limit)(index + 1, props.minValue, props.maxValue);
+        const physical = (0, util_1.limit)(index + 1, 0, range.length);
+        return presets && physical > 0 ? snapFanSpeed(Math.round(physical * 100 / range.length), presets) : physical;
     };
-    service.getCharacteristic(accessory.Characteristic.RotationSpeed)
+    const characteristic = service.getCharacteristic(accessory.Characteristic.RotationSpeed)
         .onGet(onGetHandler)
         .onSet(async (value) => {
         accessory.log.debug('Set RotationSpeed to:', value);
-        const index = Math.round(value - 1);
+        const snapped = presets ? snapFanSpeed(value, presets) : value;
+        const index = presets ? Math.max(0, Math.min(range.length - 1, Math.round(snapped * range.length / 100) - 1)) : Math.round(value - 1);
         if (index < 0 || index >= range.length) {
             accessory.log.debug('Out of range, return.');
             return;
@@ -118,6 +143,7 @@ function configureRotationSpeedLevel(accessory, service, schema, ignoreValues) {
         const speedLevel = range[index].toString();
         accessory.log.debug('Set RotationSpeedLevel to:', speedLevel);
         await accessory.sendCommands([{ code: schema.code, value: speedLevel }], true);
+        if (presets) characteristic.updateValue(snapFanSpeed(Math.round((index + 1) * 100 / range.length), presets));
     })
         .updateValue(onGetHandler()) // ensure the value is correct before set props
         .setProps(props);

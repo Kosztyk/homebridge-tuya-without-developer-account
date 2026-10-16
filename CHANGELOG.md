@@ -1,3 +1,11 @@
+# 1.1.0
+
+- Added opt-in per-device fan speed presets (`options.deviceOverrides[].fan.speedPresets`) in the custom Homebridge settings UI and JSON config. Example `[25,50,75,100]`.
+- Fans with percentage-native, discrete integer, or enumerated Tuya speed DPs snap HomeKit commands to the nearest allowed preset; 0 remains the stop value. Physical Tuya levels and steps are still respected.
+- Uniformly spaced presets set HomeKit `RotationSpeed.minStep`; non-uniform lists snap on read/write but Apple Home may still show intermediate slider positions while dragging.
+- The new setting is validated and included in the device configuration hash to trigger service refresh. Fan services opt into a dedicated subtype when preset metadata is configured; accessory UUIDs stay the same.
+- The default fan-speed behavior, Tuya QR authentication, blinds, lights, switches, and existing configuration are unchanged.
+
 # 1.0.59
 
 - Hardened the Homebridge `didFinishLaunching` callback: failed Tuya QR device initialization is caught and logged with the error stack instead of becoming an unhandled promise rejection in the child bridge process.

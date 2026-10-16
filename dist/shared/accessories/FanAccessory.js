@@ -10,6 +10,7 @@ const Light_1 = require("./characteristic/Light");
 const LockPhysicalControls_1 = require("./characteristic/LockPhysicalControls");
 const On_1 = require("./characteristic/On");
 const RotationSpeed_1 = require("./characteristic/RotationSpeed");
+const { normalizeFanSpeedPresets } = require("./characteristic/FanSpeedPresets");
 const SwingMode_1 = require("./characteristic/SwingMode");
 const SCHEMA_CODE = {
     FAN_ON: ['switch_fan', 'fan_switch', 'switch'],
@@ -48,10 +49,10 @@ class FanAccessory extends BaseAccessory_1.default {
         }
         // Common Characteristics
         if (this.getFanSpeedSchema()) {
-            (0, RotationSpeed_1.configureRotationSpeed)(this, this.fanService(), this.getFanSpeedSchema());
+            (0, RotationSpeed_1.configureRotationSpeed)(this, this.fanService(), this.getFanSpeedSchema(), this.fanSpeedPresets());
         }
         else if (this.getFanSpeedLevelSchema()) {
-            (0, RotationSpeed_1.configureRotationSpeedLevel)(this, this.fanService(), this.getFanSpeedLevelSchema());
+            (0, RotationSpeed_1.configureRotationSpeedLevel)(this, this.fanService(), this.getFanSpeedLevelSchema(), undefined, this.fanSpeedPresets());
         }
         else {
             (0, RotationSpeed_1.configureRotationSpeedOn)(this, this.fanService(), this.getSchema(...SCHEMA_CODE.FAN_ON));
@@ -355,7 +356,15 @@ class FanAccessory extends BaseAccessory_1.default {
         }
         return this.Service.Fan;
     }
+    fanSpeedPresets() {
+        const config = this.device && typeof this.platform?.getDeviceConfig === 'function'
+            ? this.platform.getDeviceConfig(this.device) : undefined;
+        return normalizeFanSpeedPresets(config?.fan?.speedPresets);
+    }
     fanServiceSubtype() {
+        if (this.fanSpeedPresets() && (this.getFanSpeedSchema() || this.getFanSpeedLevelSchema())) {
+            return 'fan_speed_presets_v1';
+        }
         const schema = this.getFanSpeedSchema();
         if (!schema) {
             return undefined;
@@ -375,6 +384,11 @@ class FanAccessory extends BaseAccessory_1.default {
         const serviceType = this.fanServiceType();
         const subtype = this.fanServiceSubtype();
         if (!subtype) {
+            // Removing custom presets must restore native service metadata too.
+            const previousPresetService = this.accessory.getServiceById(serviceType, 'fan_speed_presets_v1');
+            if (previousPresetService) {
+                this.accessory.removeService(previousPresetService);
+            }
             return this.accessory.getService(serviceType)
                 || this.accessory.addService(serviceType);
         }
@@ -397,7 +411,7 @@ class FanAccessory extends BaseAccessory_1.default {
         if (legacyService) {
             this.accessory.removeService(legacyService);
         }
-        this.log.info('Migrating discrete fan-speed service to refreshed HomeKit percentage metadata.');
+        this.log.info('Refreshing fan-speed HomeKit service metadata for configured speed intervals.');
         return this.accessory.addService(serviceType, `${this.accessory.displayName} Fan`, subtype);
     }
     lightServiceType() {

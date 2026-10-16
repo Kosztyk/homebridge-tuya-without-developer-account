@@ -17,6 +17,7 @@ const mockImports = {
   './shared/util/util': { sanitizeName: value => value },
   './shared/util/ConfigHash': { ConfigHash: class {} },
   './settings': { PLUGIN_NAME: 'test-plugin', PLATFORM_NAME: 'TestPlatform' },
+  './shared/accessories/characteristic/FanSpeedPresets': require('../dist/shared/accessories/characteristic/FanSpeedPresets'),
 };
 vm.runInNewContext(platformCode, {
   exports: moduleUnderTest.exports,

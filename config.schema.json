@@ -171,26 +171,26 @@
                 "airConditioner": {
                   "type": "object",
                   "title": "Air Conditioner Temperature Limits",
-                  "description": "Optional HomeKit temperature range override for Wi-Fi air conditioners. Values are always Celsius; Home app converts to Fahrenheit automatically for users using \u00b0F.",
+                  "description": "Optional HomeKit temperature range override for Wi-Fi air conditioners. Values are always Celsius; Home app converts to Fahrenheit automatically for users using °F.",
                   "properties": {
                     "minTemperature": {
                       "type": "number",
-                      "title": "Minimum temperature (\u00b0C)",
+                      "title": "Minimum temperature (°C)",
                       "description": "Lowest setpoint exposed to HomeKit. Common values are 16 or 17. Leave empty to use Tuya schema.",
                       "minimum": 0,
                       "maximum": 50
                     },
                     "maxTemperature": {
                       "type": "number",
-                      "title": "Maximum temperature (\u00b0C)",
+                      "title": "Maximum temperature (°C)",
                       "description": "Highest setpoint exposed to HomeKit. Common value is 31. Leave empty to use Tuya schema.",
                       "minimum": 0,
                       "maximum": 60
                     },
                     "temperatureStep": {
                       "type": "number",
-                      "title": "Temperature step (\u00b0C)",
-                      "description": "Set to 1 to suppress 0.5 \u00b0C steps. Values are Celsius even when Home app displays Fahrenheit.",
+                      "title": "Temperature step (°C)",
+                      "description": "Set to 1 to suppress 0.5 °C steps. Values are Celsius even when Home app displays Fahrenheit.",
                       "minimum": 0.1,
                       "maximum": 5,
                       "default": 1
@@ -227,7 +227,7 @@
                     "invertPosition": {
                       "type": "boolean",
                       "title": "Invert position 0/100",
-                      "description": "Enable when Tuya percentage meaning is reversed. HomeKit requires 0 = closed and 100 = open; this maps Tuya 0 \u2192 HomeKit 100 and Tuya 100 \u2192 HomeKit 0.",
+                      "description": "Enable when Tuya percentage meaning is reversed. HomeKit requires 0 = closed and 100 = open; this maps Tuya 0 → HomeKit 100 and Tuya 100 → HomeKit 0.",
                       "default": false
                     },
                     "reverseControl": {
@@ -403,6 +403,26 @@
                       "default": 0,
                       "minimum": 0,
                       "maximum": 50
+                    }
+                  }
+                },
+                "fan": {
+                  "type": "object",
+                  "title": "Fan Speed Presets",
+                  "description": "Optional per-device fan speed restriction. Automatically snap HomeKit requests to allowed percentages. Default Tuya speed mapping remains unchanged when omitted.",
+                  "properties": {
+                    "speedPresets": {
+                      "type": "array",
+                      "title": "Allowed fan speed percentages",
+                      "description": "2–20 strictly ascending integer percentages ending in 100, e.g. [25,50,75,100]. HomeKit still uses a slider; custom values are snapped.",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100
+                      },
+                      "minItems": 2,
+                      "maxItems": 20,
+                      "uniqueItems": true
                     }
                   }
                 }
