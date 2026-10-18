@@ -142,7 +142,10 @@ class AccessoryFactory {
                 platform.log.debug(`Failed to sync Homebridge service name for ${accessory.displayName}:`, error);
             }
         }
-        if (changed) {
+        // New accessories are not registered yet (registration persists them anyway). Updating an
+        // unregistered accessory adds it to Homebridge's cache, and registration then skips it as a
+        // duplicate UUID, so it never gets published.
+        if (changed && accessory._associatedPlugin) {
             try {
                 platform.api.updatePlatformAccessories([accessory]);
             }
