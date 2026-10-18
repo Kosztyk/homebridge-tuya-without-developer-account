@@ -41,6 +41,7 @@ const AirConditionerAccessory_1 = __importDefault(require("./AirConditionerAcces
 const IRControlHubAccessory_1 = __importDefault(require("./IRControlHubAccessory"));
 const IRGenericAccessory_1 = __importDefault(require("./IRGenericAccessory"));
 const IRAirConditionerAccessory_1 = __importDefault(require("./IRAirConditionerAccessory"));
+const IRAirConditionerHAAccessory_1 = __importDefault(require("./IRAirConditionerHAAccessory"));
 const SecuritySystemAccessory_1 = __importDefault(require("./SecuritySystemAccessory"));
 const VibrationSensorAccessory_1 = __importDefault(require("./VibrationSensorAccessory"));
 const WeatherStationAccessory_1 = __importDefault(require("./WeatherStationAccessory"));
@@ -354,10 +355,12 @@ function resolveAccessoryByCategory(platform, accessory, category) {
             // eslint-disable-next-line max-len
             platform.log.warn('use plugin options and config category to another. https://github.com/homebridge-plugins/homebridge-tuya/blob/develop_1.7.0/ADVANCED_OPTIONS.md https://github.com/homebridge-plugins/homebridge-tuya/blob/develop_1.7.0/SUPPORTED_DEVICES.md');
             return undefined;
+        case 'infrared_ac':
+            // The QR cloud has no remote_keys; drive the remote with its QR functions instead.
+            return new IRAirConditionerHAAccessory_1.default(platform, accessory);
         case 'infrared_tv':
         case 'infrared_stb':
         case 'infrared_box':
-        case 'infrared_ac':
         case 'infrared_fan':
         case 'infrared_light':
         case 'infrared_amplifier':

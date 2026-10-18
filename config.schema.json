@@ -197,6 +197,72 @@
                     }
                   }
                 },
+                "irAirConditioner": {
+                  "type": "object",
+                  "title": "IR Air Conditioner",
+                  "description": "Options for an IR air conditioner remote (Tuya category infrared_ac). Commands go through the Tuya QR cloud; the real AC state, room temperature and humidity are read on the LAN from IR hubs with a built-in thermostat (category hwktwkq).",
+                  "properties": {
+                    "hubId": {
+                      "type": "string",
+                      "title": "IR hub device ID",
+                      "description": "IR hub to read the AC state from. Default: the only IR hub in the home."
+                    },
+                    "hubIp": {
+                      "type": "string",
+                      "title": "IR hub IP address",
+                      "description": "LAN IP of the IR hub. Default: discovered on the LAN."
+                    },
+                    "hubProtocolVersion": {
+                      "type": "string",
+                      "title": "IR hub protocol version",
+                      "default": "3.3"
+                    },
+                    "localState": {
+                      "type": "boolean",
+                      "title": "Read state from the IR hub",
+                      "default": true
+                    },
+                    "dryAndFanModes": {
+                      "type": "boolean",
+                      "title": "Dry and fan modes as separate services",
+                      "description": "Off: no Dehumidifier / Fan mode services; fan speed gets its own fan instead.",
+                      "default": true
+                    },
+                    "fanAutoSwitch": {
+                      "type": "boolean",
+                      "title": "Fan Auto switch",
+                      "default": true
+                    },
+                    "names": {
+                      "type": "object",
+                      "title": "Service names",
+                      "properties": {
+                        "airConditioner": { "type": "string", "title": "Air conditioner" },
+                        "fanSpeed": { "type": "string", "title": "Fan speed" },
+                        "fanAuto": { "type": "string", "title": "Fan auto" },
+                        "humidity": { "type": "string", "title": "Humidity" }
+                      }
+                    },
+                    "hubDps": {
+                      "type": "object",
+                      "title": "IR hub data points",
+                      "description": "Only if the hub uses other data points than 1 power, 2 current temperature, 3 target temperature, 4 mode, 5 fan, 12 humidity.",
+                      "properties": {
+                        "power": { "type": "string" },
+                        "currentTemperature": { "type": "string" },
+                        "targetTemperature": { "type": "string" },
+                        "mode": { "type": "string" },
+                        "fan": { "type": "string" },
+                        "humidity": { "type": "string" }
+                      }
+                    },
+                    "currentTemperatureDivisor": {
+                      "type": "number",
+                      "title": "Current temperature divisor",
+                      "default": 10
+                    }
+                  }
+                },
                 "alarm": {
                   "type": "object",
                   "title": "Alarm Options",

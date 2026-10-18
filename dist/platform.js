@@ -695,7 +695,7 @@ class TuyaPlatform {
     const category = String(device?.category || '').toLowerCase();
     const codes = this.getDeviceCodes(device);
     const text = this.getDeviceText(device);
-    const hasCategoryOrName = ['kt', 'ktkzq', 'air_conditioner', 'airconditioner'].includes(category)
+    const hasCategoryOrName = ['kt', 'ktkzq', 'infrared_ac', 'air_conditioner', 'airconditioner'].includes(category)
       || ['air conditioner', 'airconditioner', 'aircon', 'a/c', 'ac ', ' ac', 'clima', 'climă', 'aer conditionat', 'aer condiționat', 'hvac'].some(term => text.includes(term));
     const hasAcTemperatureTarget = ['temp_set', 'temp_set_f', 'temp_set_c', 'target_temperature', 'temp_current_f'].some(code => codes.includes(code));
     return hasCategoryOrName || hasAcTemperatureTarget;

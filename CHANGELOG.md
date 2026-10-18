@@ -1,3 +1,10 @@
+# Unreleased
+
+- Added IR air conditioner support (`infrared_ac`) for the QR cloud: Heater Cooler with Off / Cool / Heat / Auto and target temperature, driven by the remote's QR functions (`PowerOn`, `PowerOff`, `M`, `T`, `F`). Only changed settings are sent, one function per request (the QR cloud rejects combined IR AC functions with code 1109).
+- IR hubs with a built-in AC thermostat (`hwktwkq`) are read over the LAN through the optional `tuyapi` package: real AC state (including the physical remote), room temperature and a humidity sensor.
+- New `deviceOverrides[].irAirConditioner` options: `hubId`, `hubIp`, `hubProtocolVersion`, `localState`, `dryAndFanModes`, `fanAutoSwitch`, `names`, `hubDps`, `currentTemperatureDivisor`. The `airConditioner` temperature limits now also apply to `infrared_ac` devices.
+- Fixed new accessories with extra named services never being published: the HomeKit name sync called `updatePlatformAccessories()` before registration, which added them to Homebridge's cache so registration skipped them as duplicate UUIDs.
+
 # 1.1.0
 
 - Added opt-in per-device fan speed presets (`options.deviceOverrides[].fan.speedPresets`) in the custom Homebridge settings UI and JSON config. Example `[25,50,75,100]`.

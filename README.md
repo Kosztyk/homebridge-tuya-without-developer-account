@@ -452,6 +452,39 @@ Fahrenheit display examples:
 
 HomeKit stores temperature characteristic metadata in Celsius. Do not enter Fahrenheit values in the plugin config.
 
+### IR air conditioners
+
+IR AC remotes (Tuya category `infrared_ac`) added under an IR hub in the Tuya Smart / Smart Life app are exposed as a HomeKit Heater Cooler (Off / Cool / Heat / Auto, target temperature), with a **Fan Auto** switch.
+
+- Commands use the remote's QR cloud functions (`PowerOn`, `PowerOff`, `M`, `T`, `F`). Only what changed is sent, one function at a time, so turning the AC on into its current mode sends a single `PowerOn`.
+- The QR cloud reports no state for IR remotes. IR hubs with a built-in AC thermostat (category `hwktwkq`, for example the NAS-RT01W6 "Smart AC Controller") track the AC state, including changes made with the physical remote, plus room temperature and humidity. When such a hub is in the home, the plugin reads these over the LAN (using the optional `tuyapi` package) and adds a humidity sensor. Without it, the state is optimistic.
+- Modes and the temperature range come from the remote; the `airConditioner` override above narrows the range.
+
+Optional settings:
+
+```json
+{
+  "id": "IR_AC_REMOTE_DEVICE_ID",
+  "airConditioner": { "minTemperature": 17, "maxTemperature": 30 },
+  "irAirConditioner": {
+    "hubIp": "192.168.1.61",
+    "dryAndFanModes": false,
+    "names": { "airConditioner": "Air Conditioner", "fanSpeed": "AC Fan Speed", "fanAuto": "AC Fan Auto", "humidity": "Humidity" }
+  }
+}
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `hubId` | the only IR hub in the home | IR hub to read the AC state from |
+| `hubIp` | discovered on the LAN | IR hub LAN address |
+| `hubProtocolVersion` | `3.3` | IR hub local protocol |
+| `localState` | `true` | `false` disables the LAN connection |
+| `dryAndFanModes` | `true` | `false` removes the Dehumidifier / Fan mode services. The AC then shows as on in every mode, and manual fan speed (low / medium / high) gets its own fan: off while the fan is on auto, on at a manual speed. Apple Home does not show a Heater Cooler's own fan speed. |
+| `fanAutoSwitch` | `true` | `false` removes the Fan Auto switch |
+| `names` | generated from the device name | Names of the AC, fan speed, fan auto and humidity services. Siri needs a named Heater Cooler service. |
+| `hubDps`, `currentTemperatureDivisor` | `1` power, `2` room temperature ÷ 10, `3` target, `4` mode, `5` fan, `12` humidity | Only for hubs with other data points |
+
 
 ## Adaptive Lighting
 
