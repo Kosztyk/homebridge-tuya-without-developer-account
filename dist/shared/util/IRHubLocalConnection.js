@@ -26,6 +26,7 @@ class IRHubLocalConnection extends events_1.default {
         this.connected = false;
         this.reconnectTimer = undefined;
         this.reconnectDelay = RECONNECT_MIN_MS;
+        this.failedAttempts = 0;
     }
     start() {
         this.stopped = false;
@@ -89,14 +90,31 @@ class IRHubLocalConnection extends events_1.default {
             }
         }
         try {
-            if (!this.device.device.ip) {
-                await this.device.find({ timeout: 15 });
+            // Without an IP, or when the last attempt failed (e.g. the hub got a new DHCP address),
+            // look the hub up on the LAN by its device ID.
+            if (!this.device.device.ip || this.failedAttempts > 0) {
+                await this.discover();
             }
             await this.device.connect();
+            this.failedAttempts = 0;
         }
         catch (error) {
+            this.failedAttempts++;
             this.log.debug(`[IR hub] Local connect failed: ${error?.message || error}`);
             this.scheduleReconnect();
+        }
+    }
+    async discover() {
+        const previousIp = this.device.device.ip;
+        this.device.device.ip = undefined; // tuyapi's find() does nothing while an IP is set
+        try {
+            await this.device.find({ timeout: 15 });
+        }
+        finally {
+            this.device.device.ip = this.device.device.ip || previousIp;
+        }
+        if (previousIp && this.device.device.ip !== previousIp) {
+            this.log.info(`[IR hub] Found on the LAN at ${this.device.device.ip} (was ${previousIp}).`);
         }
     }
     scheduleReconnect() {

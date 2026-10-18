@@ -477,7 +477,7 @@ Optional settings:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `hubId` | the only IR hub in the home | IR hub to read the AC state from |
-| `hubIp` | discovered on the LAN | IR hub LAN address |
+| `hubIp` | discovered on the LAN | IR hub LAN address. If the hub stops answering there (e.g. a new DHCP address), it is looked up on the LAN again by device ID. |
 | `hubProtocolVersion` | `3.3` | IR hub local protocol |
 | `localState` | `true` | `false` disables the LAN connection |
 | `dryAndFanModes` | `true` | `false` removes the Dehumidifier / Fan mode services. The AC then shows as on in every mode, and manual fan speed (low / medium / high) gets its own fan: off while the fan is on auto, on at a manual speed. Apple Home does not show a Heater Cooler's own fan speed. |
