@@ -1,3 +1,10 @@
+# 1.1.1 — 2026-10-22
+
+- Load ESM camera utilities asynchronously when a camera operation needs them, fixing plugin import under the Homebridge verification runner.
+- Report asynchronous stream-preparation and start failures through the HomeKit callback.
+- Keep Homebridge as a development-only dependency and declare HAP transport support.
+- Add regression coverage for the verification runner and camera callbacks on Node 22 and 24.
+
 # 1.1.0
 
 - Added opt-in per-device fan speed presets (`options.deviceOverrides[].fan.speedPresets`) in the custom Homebridge settings UI and JSON config. Example `[25,50,75,100]`.

@@ -3,7 +3,18 @@
 /* eslint-disable max-len */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TuyaStreamingDelegate = void 0;
-const camera_utils_1 = require("@homebridge/camera-utils");
+// camera-utils v3 is ESM. Import it only when a camera operation needs it,
+// rather than requiring its dependency graph during CommonJS plugin startup.
+let cameraUtilsPromise;
+function loadCameraUtils() {
+    if (!cameraUtilsPromise) {
+        cameraUtilsPromise = import("@homebridge/camera-utils").catch(error => {
+            cameraUtilsPromise = undefined;
+            throw error;
+        });
+    }
+    return cameraUtilsPromise;
+}
 const child_process_1 = require("child_process");
 const dgram_1 = require("dgram");
 const FfmpegStreamingProcess_1 = require("./FfmpegStreamingProcess");
@@ -144,63 +155,78 @@ class TuyaStreamingDelegate {
         }
     }
     async prepareStream(request, callback) {
-        const videoIncomingPort = await (0, camera_utils_1.reservePorts)({
-            count: 1,
-        });
-        const videoSSRC = this.hap.CameraController.generateSynchronisationSource();
-        const audioIncomingPort = await (0, camera_utils_1.reservePorts)({
-            count: 1,
-        });
-        const audioSSRC = this.hap.CameraController.generateSynchronisationSource();
-        const sessionInfo = {
-            address: request.targetAddress,
-            addressVersion: request.addressVersion,
-            audioCryptoSuite: request.audio.srtpCryptoSuite,
-            audioPort: request.audio.port,
-            audioSRTP: Buffer.concat([request.audio.srtp_key, request.audio.srtp_salt]),
-            audioSSRC: audioSSRC,
-            audioIncomingPort: audioIncomingPort[0],
-            videoCryptoSuite: request.video.srtpCryptoSuite,
-            videoPort: request.video.port,
-            videoSRTP: Buffer.concat([request.video.srtp_key, request.video.srtp_salt]),
-            videoSSRC: videoSSRC,
-            videoIncomingPort: videoIncomingPort[0],
-        };
-        const response = {
-            video: {
-                port: sessionInfo.videoIncomingPort,
-                ssrc: videoSSRC,
-                srtp_key: request.video.srtp_key,
-                srtp_salt: request.video.srtp_salt,
-            },
-            audio: {
-                port: sessionInfo.audioIncomingPort,
-                ssrc: audioSSRC,
-                srtp_key: request.audio.srtp_key,
-                srtp_salt: request.audio.srtp_salt,
-            },
-        };
-        this.pendingSessions[request.sessionID] = sessionInfo;
-        callback(undefined, response);
+        try {
+            const camera_utils_1 = await loadCameraUtils();
+            const videoIncomingPort = await (0, camera_utils_1.reservePorts)({
+                count: 1,
+            });
+            const videoSSRC = this.hap.CameraController.generateSynchronisationSource();
+            const audioIncomingPort = await (0, camera_utils_1.reservePorts)({
+                count: 1,
+            });
+            const audioSSRC = this.hap.CameraController.generateSynchronisationSource();
+            const sessionInfo = {
+                address: request.targetAddress,
+                addressVersion: request.addressVersion,
+                audioCryptoSuite: request.audio.srtpCryptoSuite,
+                audioPort: request.audio.port,
+                audioSRTP: Buffer.concat([request.audio.srtp_key, request.audio.srtp_salt]),
+                audioSSRC: audioSSRC,
+                audioIncomingPort: audioIncomingPort[0],
+                videoCryptoSuite: request.video.srtpCryptoSuite,
+                videoPort: request.video.port,
+                videoSRTP: Buffer.concat([request.video.srtp_key, request.video.srtp_salt]),
+                videoSSRC: videoSSRC,
+                videoIncomingPort: videoIncomingPort[0],
+            };
+            const response = {
+                video: {
+                    port: sessionInfo.videoIncomingPort,
+                    ssrc: videoSSRC,
+                    srtp_key: request.video.srtp_key,
+                    srtp_salt: request.video.srtp_salt,
+                },
+                audio: {
+                    port: sessionInfo.audioIncomingPort,
+                    ssrc: audioSSRC,
+                    srtp_key: request.audio.srtp_key,
+                    srtp_salt: request.audio.srtp_salt,
+                },
+            };
+            this.pendingSessions[request.sessionID] = sessionInfo;
+            callback(undefined, response);
+        }
+        catch (error) {
+            const failure = error instanceof Error ? error : new Error(String(error));
+            this.camera.log.error('Failed to prepare camera stream: ' + failure.message);
+            callback(failure);
+        }
     }
     async handleStreamRequest(request, callback) {
-        switch (request.type) {
-            case "start" /* this.hap.StreamRequestTypes.START */: {
-                this.camera.log.debug(`Start stream requested: ${request.video.width}x${request.video.height}, ${request.video.fps} fps, ${request.video.max_bit_rate} kbps`);
-                await this.startStream(request, callback);
-                break;
+        try {
+            switch (request.type) {
+                case "start" /* this.hap.StreamRequestTypes.START */: {
+                    this.camera.log.debug(`Start stream requested: ${request.video.width}x${request.video.height}, ${request.video.fps} fps, ${request.video.max_bit_rate} kbps`);
+                    await this.startStream(request, callback);
+                    break;
+                }
+                case "reconfigure" /* this.hap.StreamRequestTypes.RECONFIGURE */: {
+                    this.camera.log.debug(`Reconfigure stream requested: ${request.video.width}x${request.video.height}, ${request.video.fps} fps, ${request.video.max_bit_rate} kbps (Ignored)`);
+                    callback();
+                    break;
+                }
+                case "stop" /* this.hap.StreamRequestTypes.STOP */: {
+                    this.camera.log.debug('Stop stream requested');
+                    this.stopStream(request.sessionID);
+                    callback();
+                    break;
+                }
             }
-            case "reconfigure" /* this.hap.StreamRequestTypes.RECONFIGURE */: {
-                this.camera.log.debug(`Reconfigure stream requested: ${request.video.width}x${request.video.height}, ${request.video.fps} fps, ${request.video.max_bit_rate} kbps (Ignored)`);
-                callback();
-                break;
-            }
-            case "stop" /* this.hap.StreamRequestTypes.STOP */: {
-                this.camera.log.debug('Stop stream requested');
-                this.stopStream(request.sessionID);
-                callback();
-                break;
-            }
+        }
+        catch (error) {
+            const failure = error instanceof Error ? error : new Error(String(error));
+            this.camera.log.error('Failed to start camera stream: ' + failure.message);
+            callback(failure);
         }
     }
     async retrieveDeviceRTSP() {
@@ -213,8 +239,9 @@ class TuyaStreamingDelegate {
         const sessionInfo = this.pendingSessions[request.sessionID];
         if (!sessionInfo) {
             this.camera.log.error('Error finding session information.');
-            callback(new Error('Error finding session information'));
+            return callback(new Error('Error finding session information'));
         }
+        const camera_utils_1 = await loadCameraUtils();
         const vcodec = 'libx264';
         const mtu = 1316; // request.video.mtu is not used
         const fps = request.video.fps;
@@ -282,6 +309,7 @@ class TuyaStreamingDelegate {
             this.camera.log.debug('Device is currently offline.');
             throw new Error('Device is currently offline.');
         }
+        const camera_utils_1 = await loadCameraUtils();
         // TODO: Check if there is a stream already running to fetch snapshot.
         const rtspUrl = await this.retrieveDeviceRTSP();
         const ffmpegArgs = [
@@ -326,4 +354,3 @@ class TuyaStreamingDelegate {
     }
 }
 exports.TuyaStreamingDelegate = TuyaStreamingDelegate;
-//# sourceMappingURL=TuyaStreamDelegate.js.map
