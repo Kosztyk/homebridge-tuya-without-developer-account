@@ -503,6 +503,11 @@ class TuyaPlatform {
     for (const device of devices) {
       const deviceConfig = this.getDeviceConfig(device);
       if (deviceConfig?.category) {
+        // Keep the Tuya-reported category available for internal discovery even
+        // when the user hides a device from HomeKit with category: hidden.
+        if (device.category !== deviceConfig.category && !device.original_category) {
+          device.original_category = device.category;
+        }
         this.log.warn("Override %o category from %o to %o", device.name, device.category, deviceConfig.category);
         device.category = deviceConfig.category;
       }
@@ -516,6 +521,7 @@ class TuyaPlatform {
         unbridged: deviceConfig?.unbridged ?? false,
         schemaOverrides: deviceConfig?.schema ? JSON.stringify(deviceConfig.schema) : undefined,
         airConditioner: deviceConfig?.airConditioner ? JSON.stringify(deviceConfig.airConditioner) : undefined,
+        irAirConditioner: deviceConfig?.irAirConditioner ? JSON.stringify(deviceConfig.irAirConditioner) : undefined,
         alarm: deviceConfig?.alarm ? JSON.stringify(deviceConfig.alarm) : undefined,
         windowCovering: deviceConfig?.windowCovering ? JSON.stringify(deviceConfig.windowCovering) : undefined,
         fan: deviceConfig?.fan ? JSON.stringify(deviceConfig.fan) : undefined,
@@ -695,7 +701,7 @@ class TuyaPlatform {
     const category = String(device?.category || '').toLowerCase();
     const codes = this.getDeviceCodes(device);
     const text = this.getDeviceText(device);
-    const hasCategoryOrName = ['kt', 'ktkzq', 'air_conditioner', 'airconditioner'].includes(category)
+    const hasCategoryOrName = ['kt', 'ktkzq', 'infrared_ac', 'air_conditioner', 'airconditioner'].includes(category)
       || ['air conditioner', 'airconditioner', 'aircon', 'a/c', 'ac ', ' ac', 'clima', 'climă', 'aer conditionat', 'aer condiționat', 'hvac'].some(term => text.includes(term));
     const hasAcTemperatureTarget = ['temp_set', 'temp_set_f', 'temp_set_c', 'target_temperature', 'temp_current_f'].some(code => codes.includes(code));
     return hasCategoryOrName || hasAcTemperatureTarget;
@@ -735,6 +741,7 @@ class TuyaPlatform {
       delete scoped.windowCovering;
       delete scoped.fan;
       delete scoped.airConditioner;
+      delete scoped.irAirConditioner;
       delete scoped.switchNames;
       return scoped;
     }
@@ -767,6 +774,11 @@ class TuyaPlatform {
       if (['kt', 'ktkzq'].includes(category)) {
         delete scoped.category;
       }
+    }
+
+    if (scoped.irAirConditioner && String(device?.category || '').toLowerCase() !== 'infrared_ac') {
+      this.warnOverrideIsolationOnce(id, `[Tuya QR] Ignoring IR AC options for ${device?.name || id}; not an infrared_ac remote.`);
+      delete scoped.irAirConditioner;
     }
 
     if (scoped.switchNames && !switchLike) {
@@ -926,6 +938,9 @@ class TuyaPlatform {
   addAccessory(device) {
     const deviceConfig = this.getDeviceConfig(device);
     if (deviceConfig?.category) {
+      if (device.category !== deviceConfig.category && !device.original_category) {
+        device.original_category = device.category;
+      }
       this.log.warn("Override %o category from %o to %o", device.name, device.category, deviceConfig.category);
       device.category = deviceConfig.category;
     }

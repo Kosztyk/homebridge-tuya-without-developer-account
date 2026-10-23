@@ -39,7 +39,11 @@ For motors that do not report live `percent_state` while moving, use `windowCove
 
 # Tuya without developer account for Homebridge
 
-Current release: **1.0.46**
+![Tuya plugin icon](assets/homebridge-icon.png)
+
+**Independent community plugin.** TUYA artwork is attributed in [BRANDING.md](BRANDING.md); this project is not endorsed by Tuya or Homebridge.
+
+Current version: **1.1.3**
 
 
 A Homebridge platform plugin for Tuya and Smart Life devices that uses **Home Assistant-style Tuya QR Cloud Authentication**.
@@ -453,6 +457,43 @@ Fahrenheit display examples:
 HomeKit stores temperature characteristic metadata in Celsius. Do not enter Fahrenheit values in the plugin config.
 
 
+
+## IR air conditioners on Tuya QR (v1.1.3)
+
+Tuya Smart / Smart Life infrared AC remotes (category `infrared_ac`) can be exposed as native HomeKit Heater/Cooler accessories using **QR authorization only**. No Tuya Developer project or OpenAPI credential is needed. Unlike normal Wi-Fi ACs, an IR remote generally has no reliable state reported by the QR cloud.
+
+**Commands:** `PowerOn`, `PowerOff`, `M` (mode), `T` (temperature), `F` (fan). Each changed function is transmitted separately through the existing QR endpoint, because combined-function commands can fail with Tuya error `1109`. Powering on with the same selected settings issues only `PowerOn`. Failed writes are reported to HomeKit, with the last accepted state restored.
+
+**Optional LAN state:** Supported thermostat-equipped IR hubs (category `hwktwkq`, including the contributor's NAS-RT01W6) report power, mode, target temperature, fan, room temperature and humidity using local Tuya datapoints. The plugin discovers the matching hub by Tuya device ID and automatically looks up its new IP if DHCP changes. This read-only state path uses `tuyapi` as an **optional dependency**; the Homebridge host needs LAN access to the hub. Without a compatible hub or local connection, IR AC state is optimistic. Standard IR blasters may not provide the data points needed to detect external/physical-remote changes.
+
+Go to **Plugin Settings → IR Air Conditioner (QR Remote)** to select your remote and set its optional hub configuration, or use a per-device override:
+
+```json
+{
+  "id": "IR_AC_REMOTE_ID",
+  "airConditioner": { "minTemperature": 17, "maxTemperature": 30 },
+  "irAirConditioner": {
+    "localState": true,
+    "hubId": "OPTIONAL_IR_HUB_ID",
+    "hubIp": "192.168.1.61",
+    "hubProtocolVersion": "3.3",
+    "dryAndFanModes": false,
+    "fanAutoSwitch": true,
+    "currentTemperatureDivisor": 10,
+    "names": {
+      "airConditioner": "Living Room AC",
+      "fanSpeed": "Living Room AC Fan",
+      "fanAuto": "Living Room Fan Auto",
+      "humidity": "Living Room Humidity"
+    }
+  }
+}
+```
+
+Only include `hubId` and `hubIp` when needed. `hubDps` can override the hub's datapoint IDs if its firmware differs from the default: `power=1`, `currentTemperature=2`, `targetTemperature=3`, `mode=4`, `fan=5`, `humidity=12`. `currentTemperatureDivisor=10` interprets the raw temperature `254` as `25.4 °C`. Setting `localState=false` completely disables the LAN connection. `dryAndFanModes=false` hides the separate Dry / Fan services and instead exposes an independent manual fan-speed service; the Fan Auto switch is controlled by `fanAutoSwitch`.
+
+**Compatibility:** The new handler applies only to category `infrared_ac`. Normal Tuya Wi-Fi air conditioners and other IR remotes keep their previous code paths. QR authentication, HomeKit identity and other device overrides remain unchanged. If no compatible LAN hub is detected, the AC remains controllable with optimistic state; no dummy humidity sensor is added. If the hub is detected but offline, HomeKit humidity reports unavailable rather than inventing a reading of 0%.
+
 ## Adaptive Lighting
 
 ### v1.0.44 persistence guard
@@ -654,3 +695,5 @@ Or configure one fan manually under its existing override:
 ```
 
 Allowed values: 2–20 strictly ascending integer percentages in the range 1–100, with 100 as the last entry. The plugin rounds requests to the nearest preset (ties round up). Physical Tuya speeds are respected, so on fans with fewer hardware levels a preset may correspond to the nearest available physical speed. Zero continues to represent the HomeKit stop position; the existing fan on/off control remains separate. Native Apple Home still displays a slider rather than dedicated preset buttons. Unevenly spaced presets (e.g. 20, 50, 75, 100) snap in the plugin, but Apple Home cannot be made to visually enforce irregular stops through `minStep` alone.
+
+Hidden IR hubs (category `hidden`) remain usable as LAN state sources for IR AC remotes.

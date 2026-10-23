@@ -410,6 +410,38 @@
   </div>
 </div>
 
+
+<div class="tuya-nodev-card" id="tuyaNodevIrAcCard">
+  <div class="tuya-nodev-title">IR Air Conditioner (QR Remote)</div>
+  <p class="tuya-nodev-small mb-3">Controls an <code>infrared_ac</code> remote using Tuya QR functions. Optional local status from a supported thermostat-equipped IR hub requires the optional <code>tuyapi</code> package. This does not change Wi-Fi ACs.</p>
+  <div class="form-group"><label for="tuyaNodevIrAcDevice">IR AC remote</label>
+    <select id="tuyaNodevIrAcDevice" class="form-control"><option value="">Load detected devices first...</option></select>
+  </div>
+  <div class="form-group"><label for="tuyaNodevIrAcId">Remote device ID (optional, if not yet detected)</label>
+    <input id="tuyaNodevIrAcId" type="text" class="form-control" placeholder="infrared_ac Tuya device ID"></div>
+  <div class="tuya-nodev-grid">
+    <div class="form-group"><label for="tuyaNodevIrAcHubId">Hub device ID (optional)</label><input id="tuyaNodevIrAcHubId" type="text" class="form-control" placeholder="Auto-detect if there is one hub"></div>
+    <div class="form-group"><label for="tuyaNodevIrAcHubIp">Hub IP (optional)</label><input id="tuyaNodevIrAcHubIp" type="text" class="form-control" placeholder="LAN auto-discovery"></div>
+    <div class="form-group"><label for="tuyaNodevIrAcVersion">Local protocol</label><input id="tuyaNodevIrAcVersion" type="text" class="form-control" value="3.3"></div>
+    <div class="form-group"><label for="tuyaNodevIrAcDivisor">Room temperature divisor</label><input id="tuyaNodevIrAcDivisor" type="number" class="form-control" value="10" min="0.01" step="0.01"></div>
+  </div>
+  <div class="form-check"><input id="tuyaNodevIrAcLocalState" class="form-check-input" type="checkbox" checked><label class="form-check-label" for="tuyaNodevIrAcLocalState">Read physical AC state from supported IR hub (LAN)</label></div>
+  <div class="form-check"><input id="tuyaNodevIrAcDryFan" class="form-check-input" type="checkbox" checked><label class="form-check-label" for="tuyaNodevIrAcDryFan">Expose separate Dry and Fan modes</label></div>
+  <div class="form-check mb-3"><input id="tuyaNodevIrAcFanAuto" class="form-check-input" type="checkbox" checked><label class="form-check-label" for="tuyaNodevIrAcFanAuto">Expose Fan Auto switch</label></div>
+  <div class="form-group"><label for="tuyaNodevIrAcNames">Service names (optional JSON)</label>
+    <textarea id="tuyaNodevIrAcNames" class="form-control" rows="2" placeholder='{"airConditioner":"Living AC","fanAuto":"AC Fan Auto"}'></textarea></div>
+  <div class="form-group"><label for="tuyaNodevIrAcDps">Hub DP mapping (optional JSON)</label>
+    <textarea id="tuyaNodevIrAcDps" class="form-control" rows="2" placeholder='{"power":"1","currentTemperature":"2","targetTemperature":"3","mode":"4","fan":"5","humidity":"12"}'></textarea></div>
+  <div class="tuya-nodev-actions">
+    <button id="tuyaNodevIrAcLoad" class="btn btn-outline-primary" type="button">Load Detected Devices</button>
+    <button id="tuyaNodevIrAcApply" class="btn btn-primary" type="button">Add / Update IR AC</button>
+    <button id="tuyaNodevIrAcRemove" class="btn btn-outline-danger" type="button">Remove IR AC Options</button>
+  </div>
+  <div id="tuyaNodevIrAcStatus" class="tuya-nodev-ac-status alert alert-secondary">Optional settings: save configuration and restart Homebridge after changing them.</div>
+  <div class="tuya-nodev-table-wrap"><table class="tuya-nodev-table"><thead><tr><th>Remote</th><th>Device ID</th><th>LAN State</th><th>Hub</th><th></th></tr></thead>
+    <tbody id="tuyaNodevIrAcRows"><tr><td colspan="5">No IR AC overrides configured.</td></tr></tbody></table></div>
+</div>
+
 <script>
 (() => {
   const PLATFORM = 'TuyaNoDeveloperAccount';
@@ -1545,6 +1577,88 @@
     return detector(device) === true;
   }
 
+  function getIrAcOverrides() {
+    const cfg = ensureConfig();
+    return (cfg.options.deviceOverrides || []).filter(item => item?.id && item.irAirConditioner && typeof item.irAirConditioner === 'object');
+  }
+  function populateIrAcDeviceSelect(devices) {
+    const select = $('tuyaNodevIrAcDevice');
+    if (!select) return;
+    const before = select.value;
+    const byId = new Map();
+    for (const dev of devices || []) if (String(dev.category || '').toLowerCase() === 'infrared_ac') byId.set(dev.id, dev);
+    for (const item of getIrAcOverrides()) if (!byId.has(item.id)) byId.set(item.id, { id: item.id, name: getDeviceName(item.id) || 'Saved IR AC remote' });
+    select.innerHTML = '<option value="">Select IR AC remote...</option>' + [...byId.values()].map(dev => `<option value="${escapeHtml(dev.id)}">${escapeHtml(dev.name || dev.id)} — ${escapeHtml(dev.id)}</option>`).join('');
+    if (before && byId.has(before)) select.value = before;
+  }
+  function editIrAcOverride(id) {
+    const opts = findDeviceOverride(id)?.irAirConditioner || {};
+    $('tuyaNodevIrAcId').value = id;
+    const select = $('tuyaNodevIrAcDevice');
+    if ([...select.options].some(o => o.value === id)) select.value = id;
+    $('tuyaNodevIrAcHubId').value = opts.hubId || '';
+    $('tuyaNodevIrAcHubIp').value = opts.hubIp || '';
+    $('tuyaNodevIrAcVersion').value = opts.hubProtocolVersion || '3.3';
+    $('tuyaNodevIrAcDivisor').value = opts.currentTemperatureDivisor ?? 10;
+    $('tuyaNodevIrAcLocalState').checked = opts.localState !== false;
+    $('tuyaNodevIrAcDryFan').checked = opts.dryAndFanModes !== false;
+    $('tuyaNodevIrAcFanAuto').checked = opts.fanAutoSwitch !== false;
+    $('tuyaNodevIrAcNames').value = opts.names ? JSON.stringify(opts.names, null, 2) : '';
+    $('tuyaNodevIrAcDps').value = opts.hubDps ? JSON.stringify(opts.hubDps, null, 2) : '';
+  }
+  function renderIrAcOverrides() {
+    const tbody = $('tuyaNodevIrAcRows');
+    if (!tbody) return;
+    const list = getIrAcOverrides();
+    tbody.innerHTML = list.length ? list.map(item => `<tr><td>${escapeHtml(getDeviceName(item.id) || item.id)}</td><td><code>${escapeHtml(item.id)}</code></td>
+      <td>${item.irAirConditioner.localState === false ? 'Disabled' : 'Enabled'}</td><td>${escapeHtml(item.irAirConditioner.hubId || 'Auto')}</td>
+      <td><button type="button" class="btn btn-sm btn-outline-secondary tuya-nodev-edit-irac" data-id="${escapeHtml(item.id)}">Edit</button></td></tr>`).join('')
+      : '<tr><td colspan="5" class="tuya-nodev-small">No IR AC overrides configured.</td></tr>';
+    tbody.querySelectorAll('.tuya-nodev-edit-irac').forEach(button => button.addEventListener('click', () => editIrAcOverride(button.getAttribute('data-id'))));
+  }
+  function parseOptionalIrAcJson(inputId, allowed) {
+    const str = $(inputId).value.trim(); if (!str) return undefined;
+    const data = JSON.parse(str);
+    if (!data || Array.isArray(data) || typeof data !== 'object' || Object.keys(data).some(key => !allowed.includes(key) || typeof data[key] !== 'string')) {
+      throw new Error('Invalid object: use supported keys with string values.');
+    }
+    return data;
+  }
+  async function applyIrAcOverride() {
+    try {
+      const id = ($('tuyaNodevIrAcId').value || $('tuyaNodevIrAcDevice').value || '').trim();
+      if (!id) throw new Error('Select an IR AC remote or enter its Tuya device ID.');
+      const dev = getDetectedDeviceById(id);
+      if (dev && String(dev.category || '').toLowerCase() !== 'infrared_ac') throw new Error('This device is not an infrared_ac remote.');
+      const divisor = Number($('tuyaNodevIrAcDivisor').value);
+      if (!Number.isFinite(divisor) || divisor <= 0) throw new Error('Temperature divisor must be positive.');
+      const opts = { ...(findDeviceOverride(id)?.irAirConditioner || {}) };
+      opts.localState = $('tuyaNodevIrAcLocalState').checked;
+      opts.dryAndFanModes = $('tuyaNodevIrAcDryFan').checked;
+      opts.fanAutoSwitch = $('tuyaNodevIrAcFanAuto').checked;
+      opts.currentTemperatureDivisor = divisor;
+      for (const [key, field] of [['hubId','tuyaNodevIrAcHubId'], ['hubIp','tuyaNodevIrAcHubIp'], ['hubProtocolVersion','tuyaNodevIrAcVersion']]) {
+        const val = $(field).value.trim(); if (val) opts[key] = val; else delete opts[key];
+      }
+      for (const [key,field,allowed] of [
+        ['names','tuyaNodevIrAcNames',['airConditioner','fanSpeed','fanAuto','humidity']],
+        ['hubDps','tuyaNodevIrAcDps',['power','currentTemperature','targetTemperature','mode','fan','humidity']]
+      ]) { const val = parseOptionalIrAcJson(field, allowed); if (val) opts[key] = val; else delete opts[key]; }
+      ensureDeviceOverride(id).irAirConditioner = opts;
+      await syncConfigToUi(); markDirty();
+      populateIrAcDeviceSelect(detectedDevices); renderIrAcOverrides();
+      $('tuyaNodevIrAcStatus').textContent = 'IR AC settings saved in staged config. Click Save Configuration and restart Homebridge.';
+    } catch (error) { $('tuyaNodevIrAcStatus').textContent = error.message || 'IR AC settings were not saved.'; }
+  }
+  async function removeIrAcOverride() {
+    const id = ($('tuyaNodevIrAcId').value || $('tuyaNodevIrAcDevice').value || '').trim();
+    if (!id) return;
+    const item = findDeviceOverride(id);
+    if (item) { delete item.irAirConditioner; removeEmptyDeviceOverride(id); await syncConfigToUi(); markDirty(); }
+    populateIrAcDeviceSelect(detectedDevices); renderIrAcOverrides();
+    $('tuyaNodevIrAcStatus').textContent = 'IR AC options removed from staged config. Save Configuration and restart.';
+  }
+
   function getAcOverrides() {
     const cfg = ensureConfig();
     return (cfg.options.deviceOverrides || []).filter((item) => item && item.id
@@ -1624,6 +1738,7 @@
     populatePetFeederDeviceSelect(devices);
     populateCoverDeviceSelect(devices);
     populateFanDeviceSelect(devices);
+    populateIrAcDeviceSelect(devices);
   }
 
   function cleanupMixedOverridesUsingDetectedDevices() {
@@ -1648,6 +1763,7 @@
       renderPetFeederOverrides();
       renderCoverOverrides();
       renderFanPresetOverrides();
+      renderIrAcOverrides();
       const acCount = detectedDevices.filter((device) => device.likelyAirConditioner).length;
       const coverCount = detectedDevices.filter(isWindowCoveringDevice).length;
       const petCount = detectedDevices.filter(isPetFeederDevice).length;
@@ -2096,6 +2212,7 @@
           renderPetFeederOverrides();
           renderCoverOverrides();
           renderFanPresetOverrides();
+      renderIrAcOverrides();
         }
       });
 
@@ -2103,6 +2220,10 @@
       $('tuyaNodevCheck').addEventListener('click', () => checkAuth(true));
       $('tuyaNodevClear').addEventListener('click', clearAuth);
       $('tuyaNodevSave').addEventListener('click', saveConfig);
+      $('tuyaNodevIrAcDevice').addEventListener('change', () => editIrAcOverride($('tuyaNodevIrAcDevice').value));
+      $('tuyaNodevIrAcLoad').addEventListener('click', () => loadDetectedDevices(true));
+      $('tuyaNodevIrAcApply').addEventListener('click', applyIrAcOverride);
+      $('tuyaNodevIrAcRemove').addEventListener('click', removeIrAcOverride);
       $('tuyaNodevName').addEventListener('input', async () => {
         await syncConfigToUi();
         markDirty();

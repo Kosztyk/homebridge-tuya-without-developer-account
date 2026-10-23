@@ -52,7 +52,7 @@ function looksLikeAirConditioner(device) {
     'aer condiționat',
     'hvac',
   ].some((needle) => haystack.includes(needle))
-    || ['kt', 'wk', 'air_conditioner', 'airconditioner'].includes(String(device.category || '').toLowerCase());
+    || ['kt', 'wk', 'infrared_ac', 'air_conditioner', 'airconditioner'].includes(String(device.category || '').toLowerCase());
 }
 
 function looksLikeWindowCovering(device) {

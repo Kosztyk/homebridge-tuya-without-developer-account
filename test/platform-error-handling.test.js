@@ -125,3 +125,18 @@ for (const [method, action, label] of [
     assert.match(logs.error[0], /unknown device/);
   });
 }
+
+test('hiding an IR hub preserves original category while keeping its accessory hidden', () => {
+  const { platform } = platformFixture();
+  const warnings = [];
+  platform.log.warn = (...args) => warnings.push(args);
+  platform.log.info = () => {};
+  platform.getDeviceConfig = () => ({ category: 'hidden' });
+  const hub = { id: 'hub', name: 'Hub', category: 'hwktwkq', owner_id: 'home' };
+  platform.addAccessory(hub);
+  assert.equal(hub.category, 'hidden');
+  assert.equal(hub.original_category, 'hwktwkq');
+  // Reapplying the override must never clobber the original Tuya category.
+  platform.addAccessory(hub);
+  assert.equal(hub.original_category, 'hwktwkq');
+});

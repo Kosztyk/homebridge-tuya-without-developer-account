@@ -41,6 +41,7 @@ const AirConditionerAccessory_1 = __importDefault(require("./AirConditionerAcces
 const IRControlHubAccessory_1 = __importDefault(require("./IRControlHubAccessory"));
 const IRGenericAccessory_1 = __importDefault(require("./IRGenericAccessory"));
 const IRAirConditionerAccessory_1 = __importDefault(require("./IRAirConditionerAccessory"));
+const IRAirConditionerHAAccessory_1 = __importDefault(require("./IRAirConditionerHAAccessory"));
 const SecuritySystemAccessory_1 = __importDefault(require("./SecuritySystemAccessory"));
 const VibrationSensorAccessory_1 = __importDefault(require("./VibrationSensorAccessory"));
 const WeatherStationAccessory_1 = __importDefault(require("./WeatherStationAccessory"));
@@ -142,7 +143,9 @@ class AccessoryFactory {
                 platform.log.debug(`Failed to sync Homebridge service name for ${accessory.displayName}:`, error);
             }
         }
-        if (changed) {
+        // Never update a new accessory before Homebridge registers it; doing so caches
+        // an unassociated UUID and causes registerPlatformAccessories to skip it.
+        if (changed && accessory._associatedPlugin) {
             try {
                 platform.api.updatePlatformAccessories([accessory]);
             }
@@ -351,10 +354,11 @@ function resolveAccessoryByCategory(platform, accessory, category) {
             // eslint-disable-next-line max-len
             platform.log.warn('use plugin options and config category to another. https://github.com/homebridge-plugins/homebridge-tuya/blob/develop_1.7.0/ADVANCED_OPTIONS.md https://github.com/homebridge-plugins/homebridge-tuya/blob/develop_1.7.0/SUPPORTED_DEVICES.md');
             return undefined;
+        case 'infrared_ac':
+            return new IRAirConditionerHAAccessory_1.default(platform, accessory);
         case 'infrared_tv':
         case 'infrared_stb':
         case 'infrared_box':
-        case 'infrared_ac':
         case 'infrared_fan':
         case 'infrared_light':
         case 'infrared_amplifier':

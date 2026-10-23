@@ -309,3 +309,10 @@ Examples:
 ### Garage-door openers (`ckmkzq`)
 
 The physical `doorcontact_state` sensor is used for HomeKit OPEN/CLOSED reporting even when a radio remote changes the door without updating the cached `switch_1` command state. HomeKit OPEN/CLOSE still writes `switch_1=true` / `switch_1=false`. During a HomeKit-initiated operation, the requested TargetDoorState remains pending until the contact sensor matches or a 45-second timeout expires; external state changes otherwise synchronize target and current states. A single boolean contact does not reveal opening/closing motion direction.
+
+
+### IR air conditioner remotes (`infrared_ac`) — v1.1.3
+
+QR-cloud function commands (`PowerOn`, `PowerOff`, `M`, `T`, `F`) are supported as a native HomeKit Heater Cooler. Commands are sent individually, with state reconciliation on errors. The `M` and `T` ranges come from the QR specification, with optional Celsius limits in `deviceOverrides[].airConditioner`.
+
+A compatible thermostat-equipped IR hub (e.g. category `hwktwkq`, NAS-RT01W6) can provide LAN feedback on the real operating state, physical-remote changes, room temperature and humidity through the optional `tuyapi` dependency. Hubs that do not expose these data points cannot provide reliable external IR AC state. Configure `deviceOverrides[].irAirConditioner` in the custom Homebridge settings UI or JSON.

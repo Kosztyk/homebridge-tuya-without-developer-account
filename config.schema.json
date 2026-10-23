@@ -171,7 +171,7 @@
                 "airConditioner": {
                   "type": "object",
                   "title": "Air Conditioner Temperature Limits",
-                  "description": "Optional HomeKit temperature range override for Wi-Fi air conditioners. Values are always Celsius; Home app converts to Fahrenheit automatically for users using °F.",
+                  "description": "Optional HomeKit target temperature range for Wi-Fi or infrared_ac air conditioners. Celsius.",
                   "properties": {
                     "minTemperature": {
                       "type": "number",
@@ -423,6 +423,91 @@
                       "minItems": 2,
                       "maxItems": 20,
                       "uniqueItems": true
+                    }
+                  }
+                },
+                "irAirConditioner": {
+                  "type": "object",
+                  "title": "IR Air Conditioner",
+                  "description": "Optional QR IR air conditioner settings. Commands use Tuya QR, local hub status uses tuyapi where supported.",
+                  "properties": {
+                    "hubId": {
+                      "type": "string",
+                      "title": "IR hub device ID",
+                      "description": "If more than one hub is detected, select the one paired with this IR remote."
+                    },
+                    "hubIp": {
+                      "type": "string",
+                      "title": "IR hub IP address",
+                      "description": "Optional static IP. LAN discovery refreshes the address if it changes."
+                    },
+                    "hubProtocolVersion": {
+                      "type": "string",
+                      "title": "Local protocol version",
+                      "default": "3.3"
+                    },
+                    "localState": {
+                      "type": "boolean",
+                      "title": "Enable local hub state",
+                      "default": true
+                    },
+                    "dryAndFanModes": {
+                      "type": "boolean",
+                      "title": "Expose dry/fan modes",
+                      "default": true
+                    },
+                    "fanAutoSwitch": {
+                      "type": "boolean",
+                      "title": "Show Fan Auto switch",
+                      "default": true
+                    },
+                    "currentTemperatureDivisor": {
+                      "type": "number",
+                      "title": "Current temperature divisor",
+                      "exclusiveMinimum": 0,
+                      "default": 10
+                    },
+                    "names": {
+                      "type": "object",
+                      "title": "Optional HomeKit service names",
+                      "properties": {
+                        "airConditioner": {
+                          "type": "string"
+                        },
+                        "fanSpeed": {
+                          "type": "string"
+                        },
+                        "fanAuto": {
+                          "type": "string"
+                        },
+                        "humidity": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "hubDps": {
+                      "type": "object",
+                      "title": "Custom hub DP IDs",
+                      "properties": {
+                        "power": {
+                          "type": "string"
+                        },
+                        "currentTemperature": {
+                          "type": "string"
+                        },
+                        "targetTemperature": {
+                          "type": "string"
+                        },
+                        "mode": {
+                          "type": "string"
+                        },
+                        "fan": {
+                          "type": "string"
+                        },
+                        "humidity": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }

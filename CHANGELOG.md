@@ -1,9 +1,31 @@
-# 1.1.1 — 2026-10-22
+# 1.1.3
 
-- Load ESM camera utilities asynchronously when a camera operation needs them, fixing plugin import under the Homebridge verification runner.
-- Report asynchronous stream-preparation and start failures through the HomeKit callback.
-- Keep Homebridge as a development-only dependency and declare HAP transport support.
-- Add regression coverage for the verification runner and camera callbacks on Node 22 and 24.
+- Merged Homebridge verification and icon assets from the v1.1.1 source: dynamic ESM camera-utils import, safe camera callbacks, `supports-hap` package metadata, official vendor icon with attribution, and release/CI workflows.
+- Restored verification runner regression tests; preserved all v1.1.3 IR AC behavior and v1.1.0 fan speed presets.
+- Process Tuya LAN `dp-refresh` events alongside `data` so `hwktwkq` IR hubs report partial DP changes (mode, target temperature, fan, room temperature, humidity), even when the power DP is absent.
+- While the IR AC's LAN hub is connected, its power state takes priority over delayed/stale QR cloud `power`; cloud mode, temperature and fan continue to update. When the LAN hub disconnects, QR power updates are applied again.
+- Added regression tests for `dp-refresh` event forwarding, stopped connections, connected hub power precedence, and disconnected/no-hub cloud power fallback.
+- Changes are restricted to the IR AC handler and LAN hub connection; other device handlers, HomeKit service IDs and QR command encoding remain unchanged.
+
+# 1.1.2
+
+- Fixed IR AC local hub state when the `hwktwkq` hub is hidden through `deviceOverrides[].category: "hidden"`: an explicit `irAirConditioner.hubId` now resolves by ID, independent of the presentation category.
+- Preserved `original_category` before category overrides so automatic same-home IR hub discovery also works with hidden hubs. The Homebridge hidden accessory remains hidden.
+- Removed the legacy IR AC-only `fan_speed` / `fan_auto` service subtypes during IR AC startup to avoid orphaned services from earlier PR test installations. The current `ir_ac_fan_speed` / `ir_ac_fan_auto` subtypes remain unchanged.
+- No changes to QR authentication, QR command formats, non-IR accessory handlers, fan presets, or other devices.
+
+# 1.1.1
+
+- Fixed Homebridge verification startup under the `tsx` runner by lazily importing ESM camera utilities and safely reporting asynchronous camera callback errors.
+- Declared HomeKit HAP transport support and moved Homebridge to development dependencies.
+
+- Added QR-cloud IR air conditioner support for `infrared_ac` using the remote functions `PowerOn`, `PowerOff`, `M`, `T`, and `F`.
+- Commands are serialized as single-function requests; only changed values are sent. Rejected commands now reject the HomeKit write and restore the last accepted state (instead of silently treating the write as successful).
+- Optional read-only LAN AC state from thermostat-equipped Tuya IR hubs (category `hwktwkq`) via the optional `tuyapi` dependency, including physical remote changes, room temperature, and humidity. LAN IP is rediscovered after connectivity failures; all reconnect and key-retry timers are stopped during shutdown.
+- IR-specific overrides (`deviceOverrides[].irAirConditioner`) are supported through both custom UI and JSON. Existing Celsius `airConditioner` min/max overrides also apply to infrared ACs.
+- Prevented unregistered new accessories from being passed to Homebridge `updatePlatformAccessories` during name sync (avoids duplicate-UUID suppression on registration).
+- All other accessory categories keep their previous handlers, cloud commands and saved configuration. Existing fan-speed presets, named channels, blinds, RGB, Adaptive Lighting and alarms are not modified.
+- Initial local-test implementation; subsequent v1.1.2 and v1.1.3 fixes are documented above.
 
 # 1.1.0
 
