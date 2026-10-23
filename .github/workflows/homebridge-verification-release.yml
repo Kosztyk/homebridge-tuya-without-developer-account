@@ -10,7 +10,12 @@ jobs:
   release-current-version:
     runs-on: ubuntu-latest
     steps:
-      - name: Create release for the version already published on npm
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Create the tagged GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
@@ -32,10 +37,7 @@ jobs:
               record = api('/contents/' + name + '?ref=' + source_sha)
               return base64.b64decode(record['content']).decode()
           package = json.loads(source_file('package.json'))
-          with urllib.request.urlopen('https://registry.npmjs.org/' + package['name'] + '/latest', timeout=30) as response:
-              published = json.load(response)
-          if published['version'] != package['version']:
-              raise SystemExit('Source version differs from the latest published npm version; no release created.')
+          # Create the release for the existing source tag. npm publishing follows in this workflow.
           tag = 'v' + package['version']
           try:
               existing = api('/releases/tags/' + tag)
@@ -61,8 +63,27 @@ jobs:
               if found:
                   notes.append(line)
           body = '\n'.join(notes).strip() or package['description']
-          body += '\n\nPublished npm package: https://www.npmjs.com/package/' + package['name'] + '/v/' + package['version']
+          body += '\n\nnpm package: https://www.npmjs.com/package/' + package['name'] + '/v/' + package['version']
           body += '\n\nOfficial vendor artwork and source attribution are documented in BRANDING.md.'
           release = api('/releases', {'tag_name': tag, 'target_commitish': source_sha, 'name': tag, 'body': body, 'draft': False, 'prerelease': False, 'make_latest': 'true'})
           print('Created release: ' + release['html_url'])
           PYTHON
+
+      - name: Publish the release version to npm if not already present
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          PKG_NAME="$(node -p 'require("./package.json").name')"
+          PKG_VERSION="$(node -p 'require("./package.json").version')"
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "${PKG_NAME}@${PKG_VERSION} already exists on npm; skipping publish."
+          else
+            if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+              echo 'NPM_TOKEN secret is missing; publish the npm package manually.' >&2
+              exit 1
+            fi
+            npm pack --dry-run
+            npm publish --access public
+          fi
