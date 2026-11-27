@@ -1,3 +1,20 @@
+## v1.1.6 – Security and Privacy Improvements
+
+This release introduces three security enhancements while preserving existing device support and functionality:
+
+- **[#20 – Secure authentication logging](https://github.com/Kosztyk/homebridge-tuya-without-developer-account/issues/20):** Prevents Tuya access tokens, refresh tokens and other sensitive authentication data from appearing in Homebridge logs, including when debug mode is enabled.
+- **[#21 – JavaScript override security](https://github.com/Kosztyk/homebridge-tuya-without-developer-account/issues/21):** JavaScript execution in `onGet` and `onSet` device overrides is now disabled by default and requires explicit opt-in. Standard device overrides remain unaffected.
+- **[#22 – Configuration backup privacy](https://github.com/Kosztyk/homebridge-tuya-without-developer-account/issues/22):** Replaces unlimited full Homebridge configuration backups with a single rolling backup containing only Tuya plugin settings, preventing unnecessary retention of other plugins' credentials.
+
+### Upgrade notes
+
+No configuration changes are required for most users. Users relying on JavaScript-based device overrides must explicitly enable **Allow unsafe JavaScript device overrides** in the advanced plugin settings.
+
+Regression tests have been added for all three security fixes, and the GitHub Actions Test workflows have passed successfully.
+
+Special thanks to [@mitsos1os](https://github.com/mitsos1os) for identifying and responsibly reporting these issues.
+
+
 ## 1.0.30
 
 - Fixes HomeKit names for blinds/window coverings so Tuya DP service names like `control` are never exposed as the Apple Home name.
