@@ -9,6 +9,24 @@ const https_1 = __importDefault(require("https"));
 const crypto_1 = __importDefault(require("crypto"));
 const util_1 = require("../../shared/util/util");
 const Logger_1 = require("../../shared/util/Logger");
+const networkErrorCodes = new Set([
+    'EAI_AGAIN', 'ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT',
+    'EHOSTUNREACH', 'ENETUNREACH', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+]);
+const cloudOperations = new Map([
+    ['/v1.0/m/life/ha/access/config', 'Tuya MQTT configuration'],
+    ['/v1.0/m/life/users/homes', 'Tuya home list'],
+    ['/v1.0/m/life/ha/home/devices', 'Tuya device list'],
+    ['/v1.0/m/life/ha/devices/detail', 'Tuya device details'],
+    ['/v1.0/m/scene/ha/home/scenes', 'Tuya scene list'],
+    ['/v1.0/m/scene/ha/trigger', 'Tuya scene command'],
+]);
+function cloudOperation(path) {
+    if (path.startsWith('/v1.0/m/token/')) return 'Tuya token refresh';
+    if (/^\/v1\.1\/m\/thing\/[^/]+\/commands$/.test(path)) return 'Tuya device command';
+    if (/^\/v1\.1\/m\/life\/[^/]+\/specifications$/.test(path)) return 'Tuya device specification';
+    return cloudOperations.get(path) ?? 'Tuya cloud API';
+}
 exports.TUYA_HA_CLIENT_ID = 'HA_3y9q4ak7g4ephrvke';
 exports.TUYA_HA_SCHEMA = 'haauthorize';
 exports.TUYA_HA_QR_ENDPOINT = 'https://apigw.iotbing.com';
@@ -70,9 +88,8 @@ class TuyaHACloudAPI {
         try {
             await this.tokenUpdateListener(this.exportTokenInfo());
         }
-        catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            this.log.warn('Could not persist refreshed Tuya token: %s', msg);
+        catch {
+            this.log.warn('Could not save the refreshed Tuya token. Check Homebridge storage permissions and free space.');
         }
     }
     isLogin() {
@@ -89,9 +106,31 @@ class TuyaHACloudAPI {
         const path = `/v1.0/m/life/home-assistant/qrcode/tokens/${encodeURIComponent(token)}?clientid=${encodeURIComponent(exports.TUYA_HA_CLIENT_ID)}&usercode=${encodeURIComponent(this.userCode)}`;
         return this.rawRequest('GET', exports.TUYA_HA_QR_ENDPOINT, path);
     }
+    async requestWithDiagnostics(operation, send, retryOptions) {
+        // URLs, bodies, and vendor messages can all contain credentials. Only log fixed operation names and status.
+        if (this.log.debugMode) {
+            this.log.debug('%s request', operation);
+        }
+        let response;
+        try {
+            response = await (0, util_1.retry)(send, retryOptions);
+        }
+        catch (error) {
+            // JSON.parse and network errors can quote input in their message.
+            if (error instanceof SyntaxError) {
+                throw new Error(`${operation} returned invalid JSON.`);
+            }
+            const reason = networkErrorCodes.has(error?.code) ? ` (${error.code})` : '';
+            throw new Error(`${operation} request failed${reason}.`);
+        }
+        if (this.log.debugMode) {
+            this.log.debug('%s response (success=%s, code=%s)', operation, response?.success === true, (0, util_1.tuyaResponseCode)(response) ?? 'none');
+        }
+        return response;
+    }
     async rawRequest(method, endpoint, path, body) {
-        this.log.debug('HA raw request: %s %s%s', method, endpoint, path);
-        const res = await (0, util_1.retry)(async () => new Promise((resolve, reject) => {
+        const operation = method === 'POST' ? 'Tuya QR code creation' : 'Tuya QR sign-in';
+        return this.requestWithDiagnostics(operation, async () => new Promise((resolve, reject) => {
             const req = https_1.default.request({
                 host: new URL(endpoint).host,
                 method,
@@ -117,8 +156,6 @@ class TuyaHACloudAPI {
             }
             req.end();
         }), { retriesMax: 3, interval: 500, exponential: true, factor: 2, jitter: 100 });
-        this.log.debug('HA raw response: %s', JSON.stringify(res));
-        return res;
     }
     async refreshAccessTokenIfNeed(force = false) {
         if (!this.isLogin()) {
@@ -145,15 +182,14 @@ class TuyaHACloudAPI {
                 };
                 this.setTokenInfo(tokenInfo);
                 await this.notifyTokenUpdate();
-                this.log.info('Tuya Home Assistant QR access token refreshed and saved.');
+                this.log.info('Tuya Home Assistant QR access token refreshed.');
                 return true;
             }
-            this.log.warn('Refresh Tuya access token failed. code=%s, msg=%s', response?.code, response?.msg);
+            this.log.warn('Refresh Tuya access token failed (code=%s).', (0, util_1.tuyaResponseCode)(response) ?? 'unknown');
             return false;
         }
-        catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            this.log.error('Failed to refresh Tuya access token: %s', msg);
+        catch {
+            this.log.error('Failed to refresh the Tuya access token.');
             return false;
         }
         finally {
@@ -198,8 +234,7 @@ class TuyaHACloudAPI {
         if (finalParams) {
             requestPath += '?' + new URLSearchParams(finalParams).toString();
         }
-        this.log.debug('HA encrypted request:\nmethod = %s\nendpoint = %s\npath = %s\nbody = %s', method, this.endpoint, requestPath, JSON.stringify(finalBody));
-        const res = await (0, util_1.retry)(async () => new Promise((resolve, reject) => {
+        const res = await this.requestWithDiagnostics(cloudOperation(path), async () => new Promise((resolve, reject) => {
             const req = https_1.default.request({
                 host: new URL(this.endpoint).host,
                 method,
@@ -234,7 +269,6 @@ class TuyaHACloudAPI {
             }
             req.end();
         }), { retriesMax: 5, interval: 300, exponential: true, factor: 2, jitter: 100 });
-        this.log.debug('HA encrypted response: %s', JSON.stringify(res));
         if (!requestOptions.skipSignInvalidRetry && this.isSignInvalidResponse(res)) {
             this.log.warn('Tuya returned sign invalid. Forcing token refresh and retrying request once.');
             const refreshed = await this.refreshAccessTokenIfNeed(true);

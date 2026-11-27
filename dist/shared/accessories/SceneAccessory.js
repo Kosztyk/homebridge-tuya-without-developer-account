@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const BaseAccessory_1 = __importDefault(require("./BaseAccessory"));
+const { tuyaResponseCode } = require("../util/util");
 class SceneAccessory extends BaseAccessory_1.default {
     constructor(platform, accessory) {
         super(platform, accessory);
@@ -21,7 +22,7 @@ class SceneAccessory extends BaseAccessory_1.default {
                 service.getCharacteristic(this.Characteristic.On).updateValue(false);
             }, 150);
             if (res.success === false) {
-                this.log.warn('ExecuteScene failed. homeId = %s, code = %s, msg = %s', this.device.owner_id, res.code, res.msg);
+                this.log.warn('ExecuteScene failed for homeId=%s (code=%s).', this.device.owner_id, tuyaResponseCode(res) ?? 'unknown');
                 const { HapStatusError, HAPStatus } = this.platform.api.hap;
                 throw new HapStatusError(-70402 /* HAPStatus.SERVICE_COMMUNICATION_FAILURE */);
             }

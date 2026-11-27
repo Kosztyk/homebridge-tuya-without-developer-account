@@ -125,6 +125,11 @@
     <small class="form-text text-muted">Leave blank to discover devices from all homes available to the authenticated Tuya account.</small>
   </div>
   <div class="form-check mt-3">
+    <input id="tuyaNodevAllowUnsafeJavaScriptOverrides" class="form-check-input" type="checkbox" aria-describedby="tuyaNodevJavaScriptWarning">
+    <label class="form-check-label" for="tuyaNodevAllowUnsafeJavaScriptOverrides">Allow unsafe JavaScript device overrides (trusted code only)</label>
+    <small id="tuyaNodevJavaScriptWarning" class="form-text text-muted">Off by default. onGet/onSet scripts can execute arbitrary code with Homebridge permissions, including access to credentials, files and the network. Enable only after reviewing all overrides. Disabled scripted reads use raw values; writes requiring onSet are rejected. Save and restart Homebridge.</small>
+  </div>
+  <div class="form-check mt-3">
     <input id="tuyaNodevDebug" class="form-check-input" type="checkbox">
     <label class="form-check-label" for="tuyaNodevDebug">Enable debug logging</label>
   </div>
@@ -596,6 +601,7 @@
       .filter(Boolean);
     if (homeWhitelist.length) cfg.options.homeWhitelist = homeWhitelist;
     else delete cfg.options.homeWhitelist;
+    cfg.options.allowUnsafeJavaScriptOverrides = $('tuyaNodevAllowUnsafeJavaScriptOverrides')?.checked === true;
     cfg.options.debug = $('tuyaNodevDebug')?.checked === true;
     cfg.options.debugLevel = [];
     if ($('tuyaNodevDebugApi')?.checked === true) cfg.options.debugLevel.push('api');
@@ -1082,7 +1088,7 @@
 
   function mergeObjectDeep(target, source) {
     for (const [key, value] of Object.entries(source || {})) {
-      if (key === 'id') continue;
+      if (['id', '__proto__', 'constructor', 'prototype'].includes(key)) continue;
       if (value && typeof value === 'object' && !Array.isArray(value)
           && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
         mergeObjectDeep(target[key], value);
@@ -1146,6 +1152,7 @@
     if (existingUserCode && !currentConfig.options.userCode) {
       currentConfig.options.userCode = existingUserCode;
     }
+    $('tuyaNodevAllowUnsafeJavaScriptOverrides').checked = Object.hasOwn(currentConfig.options, 'allowUnsafeJavaScriptOverrides') && currentConfig.options.allowUnsafeJavaScriptOverrides === true;
     setAdaptiveLightingValue(currentConfig.options.enableAdaptiveLighting === true);
     mergeDuplicateDeviceOverridesInUi();
   }
@@ -2158,6 +2165,7 @@
       $('tuyaNodevName').value = currentConfig.name || 'Tuya without developer account';
       if (currentConfig.options?.userCode) setUserCode(currentConfig.options.userCode);
       $('tuyaNodevHomeWhitelist').value = Array.isArray(currentConfig.options?.homeWhitelist) ? currentConfig.options.homeWhitelist.join('\n') : '';
+      $('tuyaNodevAllowUnsafeJavaScriptOverrides').checked = Object.hasOwn(currentConfig.options, 'allowUnsafeJavaScriptOverrides') && currentConfig.options.allowUnsafeJavaScriptOverrides === true;
       $('tuyaNodevDebug').checked = currentConfig.options?.debug === true;
       $('tuyaNodevDebugApi').checked = Array.isArray(currentConfig.options?.debugLevel) && currentConfig.options.debugLevel.includes('api');
       $('tuyaNodevDebugMqtt').checked = Array.isArray(currentConfig.options?.debugLevel) && currentConfig.options.debugLevel.includes('mqtt');
@@ -2191,6 +2199,7 @@
           if (block.options?.userCode) setUserCode(block.options.userCode);
           else if (getUserCode()) setUserCode(getUserCode());
           $('tuyaNodevHomeWhitelist').value = Array.isArray(block.options?.homeWhitelist) ? block.options.homeWhitelist.join('\n') : '';
+          $('tuyaNodevAllowUnsafeJavaScriptOverrides').checked = !!block.options && Object.hasOwn(block.options, 'allowUnsafeJavaScriptOverrides') && block.options.allowUnsafeJavaScriptOverrides === true;
           $('tuyaNodevDebug').checked = block.options?.debug === true;
           $('tuyaNodevDebugApi').checked = Array.isArray(block.options?.debugLevel) && block.options.debugLevel.includes('api');
           $('tuyaNodevDebugMqtt').checked = Array.isArray(block.options?.debugLevel) && block.options.debugLevel.includes('mqtt');
@@ -2229,6 +2238,10 @@
         markDirty();
       });
       $('tuyaNodevHomeWhitelist').addEventListener('change', async () => {
+        await syncConfigToUi();
+        markDirty();
+      });
+      $('tuyaNodevAllowUnsafeJavaScriptOverrides').addEventListener('change', async () => {
         await syncConfigToUi();
         markDirty();
       });

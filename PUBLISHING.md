@@ -42,7 +42,7 @@ npm pack
 6. Test install the generated `.tgz` in a clean Homebridge instance:
 
 ```bash
-npm install --prefix /var/lib/homebridge ./homebridge-tuya-without-developer-account-1.0.0.tgz
+npm install --prefix /var/lib/homebridge ./homebridge-tuya-without-developer-account-1.1.6.tgz
 hb-service restart
 ```
 

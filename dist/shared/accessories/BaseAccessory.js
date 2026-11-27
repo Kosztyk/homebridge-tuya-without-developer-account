@@ -343,9 +343,24 @@ class BaseAccessory {
 }
 // Overriding getSchema, getStatus, sendCommands
 class OverridedBaseAccessory extends BaseAccessory {
-    constructor() {
-        super(...arguments);
-        this.eval = (script, device, value) => eval(script);
+    canRunJavaScriptOverrides() {
+        const options = this.platform?.options;
+        return !!options && Object.hasOwn(options, 'allowUnsafeJavaScriptOverrides')
+            && options.allowUnsafeJavaScriptOverrides === true;
+    }
+    // Direct eval is retained only for explicitly trusted legacy overrides.
+    // Keep device, value and this available to existing expressions.
+    eval(script, device, value) {
+        if (!this.canRunJavaScriptOverrides() || typeof script !== 'string') {
+            throw new this.platform.api.hap.HapStatusError(-70402);
+        }
+        try {
+            return eval(script);
+        } catch (_error) {
+            // Never print user-supplied JavaScript or its exception text.
+            this.log.warn('JavaScript device override failed. Review the trusted override configuration.');
+            throw new this.platform.api.hap.HapStatusError(-70402);
+        }
     }
     getOverridedSchema(code) {
         if (!this.device) {
@@ -400,7 +415,7 @@ class OverridedBaseAccessory extends BaseAccessory {
             return undefined;
         }
         const status = { code: schemaConfig.newCode || schemaConfig.code, value: oldStatus.value };
-        if (schemaConfig.onGet) {
+        if (schemaConfig.onGet && this.canRunJavaScriptOverrides()) {
             status.value = this.eval(schemaConfig.onGet, this.device, oldStatus.value);
         }
         if (!(0, util_2.deepEqual)(oldStatus, status)) {
@@ -415,6 +430,12 @@ class OverridedBaseAccessory extends BaseAccessory {
         if (!this.device) {
             await super.sendCommands(commands, debounce);
             return;
+        }
+        // Reject the entire write before mutating any command or cached state.
+        // Sending an unconverted onSet value may operate a device incorrectly.
+        if (!this.canRunJavaScriptOverrides() && commands.some(command =>
+            this.platform.getDeviceSchemaConfig(this.device, command.code, this.deviceSource)?.onSet)) {
+            throw new this.platform.api.hap.HapStatusError(-70402);
         }
         // convert to original commands
         for (const command of commands) {

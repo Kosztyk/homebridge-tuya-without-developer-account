@@ -1,3 +1,23 @@
+# 1.1.6
+
+- Security (issue #22, reported by @mitsos1os): replace unbounded full Homebridge configuration backups with one rolling, owner-only Tuya settings snapshot (`tuya-settings-backup.json`). Exclude unrelated platform/accessory credentials and bridge settings.
+- Use exclusive temporary-file creation and atomic replacement; retain previous Tuya settings and Adaptive Lighting guard state for manual rollback. Protect the platform, Adaptive Lighting save/repair and HomeKit name save/removal paths.
+- Document the backup location, restoration procedure, legacy backup cleanup and limitations. Existing full-config backups and Homebridge-managed backups are not deleted automatically.
+- Add real-filesystem regression tests with synthetic unrelated credentials. Preserve issues #20 and #21 security fixes.
+
+# 1.1.5
+
+- Security (issue #21, reported by @mitsos1os): disable JavaScript device override evaluation by default; require explicit platform-level Boolean `options.allowUnsafeJavaScriptOverrides: true`.
+- Preserve legacy `device`, `value` and `this` expression context when explicitly enabled. Without opt-in, reads use raw values and writes requiring `onSet` fail before sending or modifying cached state.
+- Add settings checkbox, schema documentation, startup warnings and regression tests; block prototype-polluting keys during duplicate override merges. Keep non-script overrides and v1.1.4 authentication logging protection unchanged.
+
+# 1.1.4
+
+- Security: fix credential exposure in Tuya QR request/response logging (issue #20; reported by @mitsos1os). Log only operation names, success flags and validated numeric Tuya codes, including when plugin/API or Homebridge debug is enabled.
+- Avoid raw vendor messages, authentication-file paths, raw MQTT payloads and exception text at authentication/transport boundaries. Preserve QR sign-in, refresh, token storage and device command behavior.
+- Add synthetic-credential regression tests for QR creation/polling, debug modes, refresh, storage errors, cloud failures and settings UI.
+- Existing IR AC, LAN hub, device handlers and Homebridge verification assets are retained.
+
 # 1.1.3
 
 - Merged Homebridge verification and icon assets from the v1.1.1 source: dynamic ESM camera-utils import, safe camera callbacks, `supports-hap` package metadata, official vendor icon with attribution, and release/CI workflows.

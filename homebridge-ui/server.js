@@ -2,8 +2,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('crypto');
 const qrcode = require('qrcode');
 const { default: TuyaHACloudAPI } = require('../dist/cloud/api/TuyaHACloudAPI');
+const { tuyaResponseCode } = require('../dist/shared/util/util');
 const { default: TuyaHADeviceManager } = require('../dist/cloud/device/TuyaHADeviceManager');
 
 const PLATFORM_NAME = 'TuyaNoDeveloperAccount';
@@ -420,12 +422,40 @@ function collectDevicesFromObject(root) {
       return file;
     }
 
-    async backupHomebridgeConfigFile(config, suffix) {
-      const file = this.getConfigFile();
-      const stamp = Math.floor(Date.now() / 1000);
-      const backup = `${file}.${suffix}-${stamp}`;
-      await fs.promises.writeFile(backup, `${JSON.stringify(config, null, 4)}\n`, { mode: 0o600 });
-      return backup;
+    async backupTuyaPlatformConfig(config) {
+      // Only the first matching platform is modified by these settings routes.
+      // Never persist the surrounding Homebridge config or other plugins' secrets.
+      const platformConfig = Array.isArray(config?.platforms)
+        ? config.platforms.find((entry) => entry?.platform === PLATFORM_NAME) || null
+        : null;
+      const snapshot = {
+        version: 1,
+        savedAt: new Date().toISOString(),
+        platformConfig,
+        adaptiveLightingState: await this.readAdaptiveLightingState(),
+      };
+      const backup = path.join(this.homebridgeStoragePath, 'tuya-settings-backup.json');
+      const temporary = `${backup}.tmp-${randomUUID()}`;
+      // Exclusive creation prevents following an existing symlink. Rename replaces
+      // the previous snapshot atomically, without writing through links to it.
+      let handle;
+      let created = false;
+      try {
+        handle = await fs.promises.open(temporary, 'wx', 0o600);
+        created = true;
+        await handle.writeFile(`${JSON.stringify(snapshot, null, 4)}\n`, 'utf8');
+        await handle.close();
+        handle = undefined;
+        await fs.promises.rename(temporary, backup);
+        created = false;
+        return backup;
+      } finally {
+        try {
+          if (handle) await handle.close();
+        } finally {
+          if (created) await fs.promises.unlink(temporary);
+        }
+      }
     }
 
     findTuyaPlatformConfig(config, create = false) {
@@ -489,7 +519,7 @@ function collectDevicesFromObject(root) {
         }
         const target = byId.get(id);
         for (const [key, value] of Object.entries(raw)) {
-          if (key === 'id') continue;
+          if (['id', '__proto__', 'constructor', 'prototype'].includes(key)) continue;
           if (value && typeof value === 'object' && !Array.isArray(value)
               && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
             target[key] = { ...target[key], ...value };
@@ -504,25 +534,27 @@ function collectDevicesFromObject(root) {
     async getPlatformConfigFromDisk() {
       try {
         const config = await this.readHomebridgeConfigFile();
-        const platformConfig = this.findTuyaPlatformConfig(config, false);
+        const previousPlatform = Array.isArray(config.platforms)
+          ? config.platforms.find((entry) => entry?.platform === PLATFORM_NAME)
+          : undefined;
         let adaptiveState = await this.readAdaptiveLightingState();
         // Bootstrap the persistent guard from an already-saved config when upgrading
         // from an older plugin version, before any stale UI write has a chance to win.
-        if (!adaptiveState && platformConfig && typeof platformConfig.options?.enableAdaptiveLighting === 'boolean') {
-          adaptiveState = await this.writeAdaptiveLightingState(platformConfig.options.enableAdaptiveLighting);
+        if (!adaptiveState && previousPlatform && typeof previousPlatform.options?.enableAdaptiveLighting === 'boolean') {
+          adaptiveState = await this.writeAdaptiveLightingState(previousPlatform.options.enableAdaptiveLighting);
         }
         let repaired = false;
         let backup;
-        if (platformConfig && adaptiveState && platformConfig.options?.enableAdaptiveLighting !== adaptiveState.enabled) {
+        if (previousPlatform && adaptiveState && previousPlatform.options?.enableAdaptiveLighting !== adaptiveState.enabled) {
           // A stale Homebridge parent SAVE can rewrite the boolean after the custom
           // UI already committed it. The dedicated state file is the authoritative
           // preference for this option and lets us repair config.json on next read.
-          backup = await this.backupHomebridgeConfigFile(config, 'bak-adaptive-repair');
-          platformConfig.options.enableAdaptiveLighting = adaptiveState.enabled;
+          backup = await this.backupTuyaPlatformConfig(config);
+          this.findTuyaPlatformConfig(config, false).options.enableAdaptiveLighting = adaptiveState.enabled;
           await this.writeHomebridgeConfigFile(config);
           repaired = true;
         }
-        return { platformConfig: platformConfig || null, adaptiveLightingState: adaptiveState, repaired, backup };
+        return { platformConfig: this.findTuyaPlatformConfig(config, false) || null, adaptiveLightingState: adaptiveState, repaired, backup };
       } catch (error) {
         throw new RequestError(error.message || 'Failed to read Homebridge config.json.', { status: 500 });
       }
@@ -537,6 +569,8 @@ function collectDevicesFromObject(root) {
       block.mode = 'cloud';
       block.options = block.options && typeof block.options === 'object' ? block.options : {};
       block.options.projectType = '3';
+      block.options.allowUnsafeJavaScriptOverrides = Object.hasOwn(block.options, 'allowUnsafeJavaScriptOverrides')
+        && block.options.allowUnsafeJavaScriptOverrides === true;
       block.options.deviceOverrides = Array.isArray(block.options.deviceOverrides) ? block.options.deviceOverrides : [];
       this.mergeDuplicateOverrides(block);
       // The custom Pet Feeder override UI has been removed. Keep real Tuya cwwsq devices
@@ -603,7 +637,7 @@ function collectDevicesFromObject(root) {
         // Homebridge UI object is later submitted.
         this.preserveDiskSwitchNames(existing, incoming);
 
-        const backup = await this.backupHomebridgeConfigFile(config, 'bak-tuya-ui');
+        const backup = await this.backupTuyaPlatformConfig(config);
         if (index >= 0) {
           config.platforms[index] = incoming;
         } else {
@@ -629,7 +663,7 @@ function collectDevicesFromObject(root) {
       try {
         const enabled = payload?.enabled === true;
         const config = await this.readHomebridgeConfigFile();
-        const backup = await this.backupHomebridgeConfigFile(config, 'bak-adaptive-lighting');
+        const backup = await this.backupTuyaPlatformConfig(config);
         const platform = this.findTuyaPlatformConfig(config, true);
         platform.options.enableAdaptiveLighting = enabled;
 
@@ -664,7 +698,7 @@ function collectDevicesFromObject(root) {
         // enable Homebridge-name sync, and change the re-import token once so
         // Apple Home receives a new accessory identity with the corrected gang
         // names. Do not rely on Homebridge UI's staged plugin config here.
-        const backup = await this.backupHomebridgeConfigFile(config, 'bak-homekit-names');
+        const backup = await this.backupTuyaPlatformConfig(config);
 
         const platform = this.findTuyaPlatformConfig(config, true);
         this.mergeDuplicateOverrides(platform);
@@ -722,10 +756,14 @@ function collectDevicesFromObject(root) {
       }
       try {
         const config = await this.readHomebridgeConfigFile();
-        const platform = this.findTuyaPlatformConfig(config, false);
-        if (!platform) {
+        const previousPlatform = Array.isArray(config.platforms)
+          ? config.platforms.find((entry) => entry?.platform === PLATFORM_NAME)
+          : undefined;
+        if (!previousPlatform) {
           return { ok: true, id, removed: false, platformConfig: null };
         }
+        const backup = await this.backupTuyaPlatformConfig(config);
+        const platform = this.findTuyaPlatformConfig(config, false);
         this.mergeDuplicateOverrides(platform);
         let removed = false;
         platform.options.deviceOverrides = platform.options.deviceOverrides.filter((entry) => {
@@ -736,7 +774,7 @@ function collectDevicesFromObject(root) {
           return keys.length > 0;
         });
         await this.writeHomebridgeConfigFile(config);
-        return { ok: true, id, removed, platformConfig: platform };
+        return { ok: true, id, removed, backup, platformConfig: platform };
       } catch (error) {
         if (error instanceof RequestError) throw error;
         throw new RequestError(error.message || 'Failed to remove channel names from config.json.', { status: 500 });
@@ -769,8 +807,12 @@ function collectDevicesFromObject(root) {
 
     async writeAuthFile(userCode, data) {
       const file = this.getAuthFile(userCode);
-      await fs.promises.mkdir(path.dirname(file), { recursive: true });
-      await fs.promises.writeFile(file, JSON.stringify(data, null, 2), { mode: 0o600 });
+      try {
+        await fs.promises.mkdir(path.dirname(file), { recursive: true });
+        await fs.promises.writeFile(file, JSON.stringify(data, null, 2), { mode: 0o600 });
+      } catch {
+        throw new RequestError('Could not save Tuya authorization. Check Homebridge storage permissions and free space.', { status: 500 });
+      }
       return file;
     }
 
@@ -804,7 +846,7 @@ function collectDevicesFromObject(root) {
       const manager = new TuyaHADeviceManager(api, false);
       const homes = await manager.getHomeList();
       if (!homes || homes.success === false) {
-        throw new Error(`Live Tuya home discovery failed: ${homes?.code || ''} ${homes?.msg || 'unknown error'}`.trim());
+        throw new Error(`Live Tuya home discovery failed (code=${tuyaResponseCode(homes) ?? 'unknown'}).`);
       }
       const homeIDs = (homes.result || [])
         .map((home) => firstString(home?.home_id, home?.ownerId, home?.id))
@@ -1039,7 +1081,7 @@ function collectDevicesFromObject(root) {
         await fs.promises.unlink(file);
       } catch (err) {
         if (!err || err.code !== 'ENOENT') {
-          throw err;
+          throw new RequestError('Could not clear Tuya authorization. Check Homebridge storage permissions.', { status: 500 });
         }
       }
       this.sessions.delete(userCode);
@@ -1067,23 +1109,25 @@ function collectDevicesFromObject(root) {
       const api = new TuyaHACloudAPI(userCode, '', 'https://apigw.iotbing.com', undefined, console, !!payload.debug);
       const response = await api.getQRCodeToken();
       if (!response || !response.success) {
-        throw new RequestError(`Failed to create Tuya QR token: ${response?.code || ''} ${response?.msg || 'Unknown error'}`.trim(), {
-          status: 502,
-          response,
-        });
+        throw new RequestError(`Failed to create Tuya QR code (code=${tuyaResponseCode(response) ?? 'unknown'}).`, { status: 502 });
       }
 
       const token = response.result?.qrcode;
-      if (!token) {
-        throw new RequestError('Tuya QR token response did not include result.qrcode.', { status: 502, response });
+      if (typeof token !== 'string' || !token) {
+        throw new RequestError('Tuya QR token response did not include result.qrcode.', { status: 502 });
       }
 
       const qrPayload = `tuyaSmart--qrLogin?token=${token}`;
-      const qrDataUrl = await qrcode.toDataURL(qrPayload, {
-        errorCorrectionLevel: 'M',
-        margin: 2,
-        width: 300,
-      });
+      let qrDataUrl;
+      try {
+        qrDataUrl = await qrcode.toDataURL(qrPayload, {
+          errorCorrectionLevel: 'M',
+          margin: 2,
+          width: 300,
+        });
+      } catch {
+        throw new RequestError('Could not render the Tuya QR code. Generate a new code and try again.', { status: 502 });
+      }
 
       this.sessions.set(userCode, {
         userCode,
@@ -1154,10 +1198,7 @@ function collectDevicesFromObject(root) {
         };
 
         if (!authData.terminalId || !authData.endpoint || !authData.tokenInfo.access_token || !authData.tokenInfo.refresh_token) {
-          throw new RequestError('Tuya login succeeded but the response was incomplete.', {
-            status: 502,
-            response: loginResponse,
-          });
+          throw new RequestError('Tuya login succeeded but the response was incomplete.', { status: 502 });
         }
 
         const file = await this.writeAuthFile(userCode, authData);
@@ -1172,12 +1213,12 @@ function collectDevicesFromObject(root) {
         };
       }
 
-      const message = `${loginResponse?.code || ''} ${loginResponse?.msg || 'Waiting for scan / approval'}`.trim();
+      const code = tuyaResponseCode(loginResponse);
       return {
         authenticated: false,
         pending: true,
-        code: loginResponse?.code || null,
-        message,
+        code,
+        message: code === null ? 'Waiting for scan / approval.' : `Waiting for scan / approval (Tuya code ${code}).`,
       };
     }
   }

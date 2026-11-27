@@ -8,6 +8,15 @@ exports.deepEqual = deepEqual;
 exports.debounce = debounce;
 exports.retry = retry;
 exports.generateUUID = generateUUID;
+exports.tuyaResponseCode = tuyaResponseCode;
+// Tuya error codes are numeric. Free-form fields can contain credentials.
+function tuyaResponseCode(response) {
+    const code = response?.code;
+    if (typeof code !== 'string' && typeof code !== 'number') {
+        return null;
+    }
+    return /^-?\d{1,10}$/.test(code) ? code : null;
+}
 function remap(value, srcStart, srcEnd, dstStart, dstEnd) {
     const percent = (value - srcStart) / (srcEnd - srcStart);
     const result = percent * (dstEnd - dstStart) + dstStart;

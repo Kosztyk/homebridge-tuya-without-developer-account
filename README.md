@@ -43,7 +43,37 @@ For motors that do not report live `percent_state` while moving, use `windowCove
 
 **Independent community plugin.** TUYA artwork is attributed in [BRANDING.md](BRANDING.md); this project is not endorsed by Tuya or Homebridge.
 
-Current version: **1.1.3**
+Current version: **1.1.6**
+
+### Security update (issue #22): bounded, plugin-only settings backups
+
+Starting with 1.1.6, the custom Tuya settings UI keeps **one rolling backup** at `<Homebridge storage path>/tuya-settings-backup.json` (for example, `/var/lib/homebridge/tuya-settings-backup.json`). This snapshot contains the previous Tuya platform block (the first `TuyaNoDeveloperAccount` entry, or `null` if absent), its previous Adaptive Lighting guard state, a format version and timestamp. It excludes other platform/accessory entries, bridge settings and separate QR authentication files. Platform settings, Adaptive Lighting saves/repairs and HomeKit channel name saves/removals use the same file. The previous snapshot is atomically replaced on each backed-up write; on POSIX systems the new file is created with owner-only permissions (`0600`, subject to umask). A backup failure prevents the settings write. The snapshot may still contain private Tuya configuration; do not share it.
+
+**Restoring:** Stop Homebridge and close its settings UI. Inspect the snapshot locally. Replace only the first matching `TuyaNoDeveloperAccount` entry in the `platforms` array of `config.json` with `platformConfig` (or remove the first matching entry if the saved value is `null`). Leave all other configuration unchanged. Restore `adaptiveLightingState` to `tuya-adaptive-lighting.json` in the same storage directory, or remove that guard file if the saved value is `null`. Keep these files private, validate JSON, review any JavaScript override opt-in before restarting, then restart Homebridge. If the platform is missing and the snapshot has a non-null block, insert that block in `platforms`. Never replace the entire `config.json` with the snapshot. This is a manual rollback, not a full Homebridge backup.
+
+**Existing backups:** Older plugin releases may have left full-config backups alongside `config.json`. They are not removed automatically. Review and delete the following files if you no longer need them; they can contain credentials from unrelated plugins even if those credentials have since been removed. The plugin does not manage Homebridge's own backup system. Interrupted processes may also leave a private `tuya-settings-backup.json.tmp-*` temporary file; remove it only when no settings save is in progress.
+
+For example, list legacy plugin-created backups on Linux (adjust the storage path to your installation):
+
+```sh
+find /var/lib/homebridge -maxdepth 1 -type f \
+  \( -name 'config.json.bak-tuya-ui-*' -o -name 'config.json.bak-adaptive-lighting-*' \
+     -o -name 'config.json.bak-adaptive-repair-*' -o -name 'config.json.bak-homekit-names-*' \) -print
+```
+
+After reviewing the list, delete only the files you no longer need. Do not delete the active `config.json` or unrelated Homebridge backups. Deleting files does not revoke credentials or guarantee erasure from external backups.
+
+### Security update (issue #21): JavaScript overrides require opt-in
+
+`options.deviceOverrides[].schema[].onGet` and `onSet` are legacy JavaScript expressions, not a sandbox. They can execute arbitrary code with Homebridge's permissions (including reading credentials and files, making network requests, or changing devices). Do not enable them for unreviewed configurations copied from forums or issues.
+
+Starting with 1.1.5, JavaScript execution is disabled unless the platform-level setting `options.allowUnsafeJavaScriptOverrides` is explicitly the JSON Boolean `true`. In the plugin settings, under Advanced, enable **Allow unsafe JavaScript device overrides (trusted code only)** only after reviewing every configured expression, then save and restart Homebridge. To opt in manually, add `"allowUnsafeJavaScriptOverrides": true` inside your existing `options` object (do not replace the object). Disable it by setting it to `false` or removing it and restarting.
+
+Existing scripts remain in your configuration. While disabled, scripted reads return the original datapoint value (which may not represent the intended HomeKit value); writes requiring `onSet` are rejected with a communication error instead of sending an unconverted value. Ordinary category, schema/code mappings, names and other non-script overrides continue to work. Review or remove any scripts you no longer need. The opt-in applies to all device, product and global overrides in this platform; it is not a security boundary once enabled. Issue #20's credential-log protections remain included.
+
+### Security update (issue #20)
+
+Version 1.1.4 removes authentication request/response payloads and raw vendor error messages from plugin diagnostics, even with API or Homebridge debug enabled. QR authorization and token refresh continue to work normally. If you previously shared v1.1.3 logs, remove or redact them wherever possible and revoke the exposed authorization/session using Tuya or Smart Life account controls where available. Clear authentication and scan again; re-scanning alone is not a guarantee that previously issued tokens are revoked. Never share QR codes, authorization files or credentials. Existing historical logs are not automatically sanitized by this update.
 
 
 A Homebridge platform plugin for Tuya and Smart Life devices that uses **Home Assistant-style Tuya QR Cloud Authentication**.

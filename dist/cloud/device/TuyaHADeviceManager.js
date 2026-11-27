@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 /* eslint-disable max-len */
 const events_1 = __importDefault(require("events"));
 const Logger_1 = require("../../shared/util/Logger");
+const { tuyaResponseCode } = require("../../shared/util/util");
 const TuyaDevice_1 = __importStar(require("./TuyaDevice"));
 const TuyaHASharingMQ_1 = __importDefault(require("../api/TuyaHASharingMQ"));
 var Events;
@@ -94,7 +95,7 @@ class TuyaHADeviceManager extends events_1.default {
         for (const homeID of homeIDList) {
             const res = await this.getHomeDeviceList(String(homeID));
             if (!res.success) {
-                this.log.warn('Fetching HA QR device list failed for homeId=%s. code=%s, msg=%s', homeID, res.code, res.msg);
+                this.log.warn('Fetching HA QR device list failed for homeId=%s (code=%s).', homeID, tuyaResponseCode(res) ?? 'unknown');
                 continue;
             }
             const rawDevices = Array.isArray(res.result) ? res.result : [];
@@ -160,7 +161,7 @@ class TuyaHADeviceManager extends events_1.default {
     async getDeviceSchema(deviceID) {
         const res = await this.api.get(`/v1.1/m/life/${deviceID}/specifications`);
         if (!res.success) {
-            this.log.warn('Get HA QR device specification failed. devId = %s, code = %s, msg = %s', deviceID, res.code, res.msg);
+            this.log.warn('Get HA QR device specification failed for devId=%s (code=%s).', deviceID, tuyaResponseCode(res) ?? 'unknown');
             return [];
         }
         const result = res.result || {};
@@ -223,7 +224,7 @@ class TuyaHADeviceManager extends events_1.default {
         this.log.info(`[${deviceName}] Sending command (Tuya HA QR cloud): ${commandStr}`);
         const res = await this.api.post(`/v1.1/m/thing/${deviceID}/commands`, null, { commands });
         if (!res.success) {
-            this.log.warn('Send HA QR command failed. devId=%s, code=%s, msg=%s', deviceID, res.code, res.msg);
+            this.log.warn('Send HA QR command failed for devId=%s (code=%s).', deviceID, tuyaResponseCode(res) ?? 'unknown');
             return false;
         }
         const target = this.getDevice(deviceID);
@@ -244,7 +245,7 @@ class TuyaHADeviceManager extends events_1.default {
     async getSceneList(homeID) {
         const res = await this.api.get('/v1.0/m/scene/ha/home/scenes', { homeId: homeID });
         if (!res.success) {
-            this.log.warn('Get HA QR scene list failed. homeId = %s, code = %s, msg = %s', homeID, res.code, res.msg);
+            this.log.warn('Get HA QR scene list failed for homeId=%s (code=%s).', homeID, tuyaResponseCode(res) ?? 'unknown');
             return [];
         }
         const scenes = [];
@@ -293,9 +294,8 @@ class TuyaHADeviceManager extends events_1.default {
                 this.onDeviceOther(data.bizData.devId, data.bizCode, data);
             }
         }
-        catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            this.log.warn('Tuya HA MQTT processing error: %s', msg);
+        catch {
+            this.log.warn('Tuya HA MQTT processing error.');
         }
     }
     mapRawDPStatus(device, dpId, rawValue) {

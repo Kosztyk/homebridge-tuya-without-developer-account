@@ -164,6 +164,14 @@
                       },
                       "property": {
                         "type": "object"
+                      },
+                      "onGet": {
+                        "type": "string",
+                        "description": "Trusted JavaScript expression; requires options.allowUnsafeJavaScriptOverrides to be true."
+                      },
+                      "onSet": {
+                        "type": "string",
+                        "description": "Trusted JavaScript expression; requires options.allowUnsafeJavaScriptOverrides to be true."
                       }
                     }
                   }
@@ -538,6 +546,12 @@
             "title": "HomeKit name re-import token",
             "description": "Advanced. Apple Home can keep old cached service names such as Bathroom 1/2/3. Set or change this token once to force Tuya accessories to be re-imported into HomeKit using the service names currently shown in Homebridge Accessories. Leave blank normally. Changing it will make Apple Home see the accessories as new and may require moving them back to rooms/favorites/automations.",
             "default": ""
+          },
+          "allowUnsafeJavaScriptOverrides": {
+            "type": "boolean",
+            "title": "Allow unsafe JavaScript device overrides (trusted code only)",
+            "description": "Off by default. onGet/onSet can execute arbitrary code with Homebridge permissions, including access to files, credentials and the network. Enable only after reviewing all overrides. Disabled scripted reads use raw values; writes requiring onSet are rejected. Save and restart.",
+            "default": false
           }
         }
       }
@@ -561,6 +575,7 @@
         "options.preserveHomeKitNames",
         "options.homeKitNameReimportToken",
         "options.syncHomebridgeNamesToHomeKit",
+        "options.allowUnsafeJavaScriptOverrides",
         "options.deviceOverrides",
         "options.debug",
         "options.debugLevel"

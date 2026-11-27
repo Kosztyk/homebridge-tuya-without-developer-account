@@ -7,7 +7,7 @@ const fs = require("fs");
 const TuyaHACloudAPI = require("./cloud/api/TuyaHACloudAPI").default;
 const TuyaHADeviceManager = require("./cloud/device/TuyaHADeviceManager").default;
 const AccessoryFactory = require("./shared/accessories/AccessoryFactory").default;
-const { sanitizeName } = require("./shared/util/util");
+const { sanitizeName, tuyaResponseCode } = require("./shared/util/util");
 const { ConfigHash } = require("./shared/util/ConfigHash");
 const { PLUGIN_NAME, PLATFORM_NAME } = require("./settings");
 const { normalizeFanSpeedPresets } = require("./shared/accessories/characteristic/FanSpeedPresets");
@@ -80,6 +80,8 @@ class TuyaPlatform {
     // Old Tuya IoT OpenAPI credentials, local LAN mode, username/password login, and hybrid mode are not accepted.
     this.config.mode = "cloud";
     this.options.projectType = "3";
+    this.options.allowUnsafeJavaScriptOverrides = Object.hasOwn(this.options, 'allowUnsafeJavaScriptOverrides')
+      && this.options.allowUnsafeJavaScriptOverrides === true;
     const persistedAdaptiveLighting = readPersistedAdaptiveLighting(this.api.user.storagePath());
     if (typeof persistedAdaptiveLighting === 'boolean') {
       if (this.options.enableAdaptiveLighting !== persistedAdaptiveLighting) {
@@ -141,7 +143,7 @@ class TuyaPlatform {
     let skippedDuplicateId = 0;
     const mergeOverride = (target, source) => {
       for (const [key, value] of Object.entries(source)) {
-        if (key === 'id') {
+        if (['id', '__proto__', 'constructor', 'prototype'].includes(key)) {
           continue;
         }
         if (value && typeof value === 'object' && !Array.isArray(value)
@@ -408,6 +410,7 @@ class TuyaPlatform {
     if (!this.options.deviceOverrides) {
       return true;
     }
+    let hasJavaScriptOverrides = false;
     for (const deviceOverride of this.options.deviceOverrides) {
       if (!deviceOverride.schema) {
         continue;
@@ -439,6 +442,7 @@ class TuyaPlatform {
         }
         item.code = code;
         seenCodes.add(code);
+        if (item.onGet || item.onSet) hasJavaScriptOverrides = true;
         validSchema.push(item);
       }
 
@@ -449,6 +453,11 @@ class TuyaPlatform {
         this.log.warn('[Tuya QR] Ignored %d duplicate schema override(s) for device id "%s".', skippedDuplicateCode, deviceOverride.id);
       }
       deviceOverride.schema = validSchema;
+    }
+    if (this.options.allowUnsafeJavaScriptOverrides === true) {
+      this.log.warn('[Tuya QR] Unsafe JavaScript device overrides are enabled. Trusted scripts run with Homebridge permissions; review all device overrides.');
+    } else if (hasJavaScriptOverrides) {
+      this.log.warn('[Tuya QR] JavaScript device overrides are disabled. Scripted reads use raw values and writes requiring onSet are rejected. Review overrides before explicitly enabling allowUnsafeJavaScriptOverrides.');
     }
     return true;
   }
@@ -487,9 +496,13 @@ class TuyaPlatform {
 
   async writeAuthData(userCode, data) {
     const file = this.getAuthFile(userCode);
-    await fs.promises.mkdir(path.dirname(file), { recursive: true });
-    await fs.promises.writeFile(file, JSON.stringify(data, null, 2), { mode: 0o600 });
-    this.log.info("[Tuya QR] Auth token saved at %s", file);
+    try {
+      await fs.promises.mkdir(path.dirname(file), { recursive: true });
+      await fs.promises.writeFile(file, JSON.stringify(data, null, 2), { mode: 0o600 });
+    } catch {
+      throw new Error("Could not save Tuya authorization. Check Homebridge storage permissions and free space.");
+    }
+    this.log.info("[Tuya QR] Saved authorization in Homebridge storage.");
   }
 
   async initDevices() {
@@ -520,6 +533,8 @@ class TuyaPlatform {
         customCategory: deviceConfig?.category,
         unbridged: deviceConfig?.unbridged ?? false,
         schemaOverrides: deviceConfig?.schema ? JSON.stringify(deviceConfig.schema) : undefined,
+        allowUnsafeJavaScriptOverrides: deviceConfig?.schema?.some(item => item.onGet || item.onSet)
+          ? this.options.allowUnsafeJavaScriptOverrides === true : undefined,
         airConditioner: deviceConfig?.airConditioner ? JSON.stringify(deviceConfig.airConditioner) : undefined,
         irAirConditioner: deviceConfig?.irAirConditioner ? JSON.stringify(deviceConfig.irAirConditioner) : undefined,
         alarm: deviceConfig?.alarm ? JSON.stringify(deviceConfig.alarm) : undefined,
@@ -578,7 +593,6 @@ class TuyaPlatform {
     if (!authData) {
       this.log.error("[Tuya QR] No saved QR authentication found for this User Code.");
       this.log.error("[Tuya QR] Open Homebridge UI → Plugins → Tuya without developer account for Homebridge → Settings → Generate QR Code, scan it, save, then restart Homebridge.");
-      this.log.error("[Tuya QR] Expected auth file: %s", this.getAuthFile(userCode));
       return undefined;
     }
 
@@ -596,7 +610,7 @@ class TuyaPlatform {
     this.log.info("[Tuya QR] Fetching home list.");
     const res = await deviceManager.getHomeList();
     if (res.success === false) {
-      this.log.error(`[Tuya QR] Fetching home list failed. code=${res.code}, msg=${res.msg}`);
+      this.log.error(`[Tuya QR] Fetching home list failed (code=${tuyaResponseCode(res) ?? 'unknown'}).`);
       this.log.error("[Tuya QR] Token refresh was attempted automatically. If this continues, clear authentication in the plugin settings and scan again.");
       return undefined;
     }

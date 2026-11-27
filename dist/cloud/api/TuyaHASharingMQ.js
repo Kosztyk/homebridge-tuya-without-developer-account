@@ -54,26 +54,32 @@ class TuyaHASharingMQ {
         this.stop();
         const res = await this.api.post('/v1.0/m/life/ha/access/config', null, { linkId: `homebridge-tuya-ha.${(0, util_1.generateUUID)()}` });
         if (!res || !res.success) {
-            this.log.warn('Get Tuya HA MQTT config failed. code = %s, msg = %s', res?.code, res?.msg);
+            this.log.warn('Get Tuya HA MQTT config failed (code=%s).', (0, util_1.tuyaResponseCode)(res) ?? 'unknown');
             return;
         }
         this.config = res.result;
-        const url = new url_1.URL(this.config.url);
-        const protocol = url.protocol === 'ssl:' ? 'mqtts' : url.protocol.replace(':', '') || 'mqtt';
-        const connectUrl = `${protocol}://${url.hostname}:${url.port}`;
-        this.log.info('Connecting to Tuya HA MQTT: %s', connectUrl);
-        const client = mqtt_1.default.connect(connectUrl, {
-            clientId: this.config.clientId,
-            username: this.config.username,
-            password: this.config.password,
-        });
+        let client;
+        try {
+            const url = new url_1.URL(this.config.url);
+            const protocol = url.protocol === 'ssl:' ? 'mqtts' : url.protocol.replace(':', '') || 'mqtt';
+            const connectUrl = `${protocol}://${url.hostname}:${url.port}`;
+            this.log.info('Connecting to Tuya HA MQTT.');
+            client = mqtt_1.default.connect(connectUrl, {
+                clientId: this.config.clientId,
+                username: this.config.username,
+                password: this.config.password,
+            });
+        }
+        catch {
+            throw new Error('Could not initialize the Tuya HA MQTT connection.');
+        }
         client.on('connect', this.onConnect.bind(this));
-        client.on('error', error => this.log.error('Tuya HA MQTT error: %s', error.message));
+        client.on('error', () => this.log.error('Tuya HA MQTT connection error.'));
         client.on('end', () => this.log.debug('Tuya HA MQTT end'));
         client.on('message', this.onMessage.bind(this));
         this.client = client;
         const timeout = Math.max(60, (this.config.expireTime || 7200) - 60);
-        this.reconnectTimer = setTimeout(() => this.connect().catch(error => this.log.error('Tuya HA MQTT reconnect failed: %s', error.message)), timeout * 1000);
+        this.reconnectTimer = setTimeout(() => this.connect().catch(() => this.log.error('Tuya HA MQTT reconnect failed.')), timeout * 1000);
     }
     onConnect() {
         this.log.info('Tuya HA MQTT connected');
@@ -99,14 +105,13 @@ class TuyaHASharingMQ {
     onMessage(_topic, payload) {
         try {
             const message = JSON.parse(payload.toString('utf8'));
-            this.log.debug('Tuya HA MQTT message: %s', JSON.stringify(message));
+            if (this.log.debugMode) this.log.debug('Tuya HA MQTT message received.');
             for (const listener of this.messageListeners) {
                 listener(message);
             }
         }
-        catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            this.log.warn('Could not parse Tuya HA MQTT message: %s', msg);
+        catch {
+            this.log.warn('Could not process Tuya HA MQTT message.');
         }
     }
 }
